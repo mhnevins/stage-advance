@@ -59,8 +59,8 @@ const CATALOG = [
   { group: "Drums", label: "Hi-Hat", mic: "e614 (SDC)", stand: "Short boom" },
   { group: "Drums", label: "Rack Tom", mic: "e604 (clip)", stand: "None" },
   { group: "Drums", label: "Floor Tom", mic: "e604 (clip)", stand: "None" },
-  { group: "Drums", label: "OH L", mic: "sE7 (SDC)", stand: "Tall boom" },
-  { group: "Drums", label: "OH R", mic: "sE7 (SDC)", stand: "Tall boom" },
+  { group: "Drums", label: "OHSL", mic: "sE7 (SDC)", stand: "Tall boom" },
+  { group: "Drums", label: "OHSR", mic: "sE7 (SDC)", stand: "Tall boom" },
   { group: "Perc", label: "Cajon", mic: "Audix D6", stand: "Short boom" },
   { group: "Perc", label: "Congas", mic: "SM57", stand: "Short boom" },
   { group: "Perc", label: "Perc Overhead", mic: "Roswell MiniK47", stand: "Tall boom" },
@@ -143,8 +143,8 @@ const buildChannelsFromSubmission = (sub) => {
         add("Drums", "Hi-Hat", "e614 (SDC)", "Short boom");
         add("Drums", "Rack Tom", "e604 (clip)", "None");
         add("Drums", "Floor Tom", "e604 (clip)", "None");
-        add("Drums", "OH L", "sE7 (SDC)", "Tall boom");
-        add("Drums", "OH R", "sE7 (SDC)", "Tall boom");
+        add("Drums", "OHSL", "sE7 (SDC)", "Tall boom");
+        add("Drums", "OHSR", "sE7 (SDC)", "Tall boom");
         break;
       case "Percussion":
         add("Perc", who ? `Percussion — ${who}` : "Percussion", "Roswell MiniK47", "Tall boom");
