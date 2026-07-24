@@ -216,12 +216,16 @@ const submissionToShow = (sub) => {
   };
 };
 
+const isBandFormRoute = () => /^\/band-form\/?$/.test(window.location.pathname);
+
 export default function StageAdvance() {
-  const [mode, setMode] = useState("plan"); // 'plan' | 'form'
+  const standalone = isBandFormRoute();
+  const [mode, setMode] = useState(standalone ? "form" : "plan"); // 'plan' | 'form'
   const [shows, setShows] = useState([]);
   const [activeId, setActiveId] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
   const [printMsg, setPrintMsg] = useState("");
   const [customName, setCustomName] = useState("");
   const [customGroup, setCustomGroup] = useState("Other");
@@ -762,14 +766,24 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
           <h2 className="sa-h2" style={{ flex: 1, color: "#4CC3C9" }}>
             Questionnaire inbox — {submissions.length}
           </h2>
+          <button
+            className="sa-btn ghost"
+            onClick={() => {
+              navigator.clipboard.writeText(`${window.location.origin}/band-form`);
+              setLinkCopied(true);
+              setTimeout(() => setLinkCopied(false), 1600);
+            }}
+          >
+            {linkCopied ? "Link copied ✓" : "Copy band form link"}
+          </button>
           <button className="sa-btn ghost" onClick={() => { loadSubmissions(); setInboxMsg("refreshed"); setTimeout(() => setInboxMsg(""), 1200); }}>
             {inboxMsg || "Refresh"}
           </button>
         </div>
         {submissions.length === 0 ? (
           <div className="sa-sub">
-            No submissions yet. Publish this app and send the link to a band leader — tell them to hit the
-            "Band Form" tab. Their answers land here, ready to import as a draft input list.
+            No submissions yet. Send a band leader the band form link above — it opens a standalone
+            page with no access to this planner. Their answers land here, ready to import as a draft input list.
           </div>
         ) : submissions.map((s) => (
           <div key={s.id} className="sa-inbox-row">
@@ -1136,10 +1150,12 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
             <div className="sa-logo">Stage<span>Advance</span></div>
             <div className="sa-sub">input lists · mic pulls · stand counts — before you load the van</div>
           </div>
-          <div className="sa-tabs no-print">
-            <button className={`sa-tab${mode === "plan" ? " on" : ""}`} onClick={() => setMode("plan")}>Planner</button>
-            <button className={`sa-tab${mode === "form" ? " on" : ""}`} onClick={() => { setMode("form"); setFormDone(false); }}>Band Form</button>
-          </div>
+          {!standalone && (
+            <div className="sa-tabs no-print">
+              <button className={`sa-tab${mode === "plan" ? " on" : ""}`} onClick={() => setMode("plan")}>Planner</button>
+              <button className={`sa-tab${mode === "form" ? " on" : ""}`} onClick={() => { setMode("form"); setFormDone(false); }}>Band Form</button>
+            </div>
+          )}
         </div>
 
         {mode === "form" ? renderForm() : active ? renderShow() : renderShowList()}
