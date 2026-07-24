@@ -53,7 +53,8 @@ const STAND_OPTIONS = ["Tall boom", "Short boom", "Straight", "Drum clamp", "Des
 
 /* Defaults chosen from your inventory */
 const CATALOG = [
-  { group: "Drums", label: "Kick", mic: "Beta 52A", stand: "Short boom" },
+  { group: "Drums", label: "Kick In", mic: "Beta 52A", stand: "Short boom" },
+  { group: "Drums", label: "Kick Out", mic: "Beta 52A", stand: "Short boom" },
   { group: "Drums", label: "Snare Top", mic: "SM57", stand: "Drum clamp" },
   { group: "Drums", label: "Snare Bottom", mic: "e604 (clip)", stand: "None" },
   { group: "Drums", label: "Hi-Hat", mic: "e614 (SDC)", stand: "Short boom" },
@@ -72,6 +73,7 @@ const CATALOG = [
   { group: "Keys", label: "Keys L/R", mic: "Stereo DI", stand: "None", di: true },
   { group: "Keys", label: "Keys 2 (mono)", mic: "SB-2 (passive DI)", stand: "None", di: true },
   { group: "Keys", label: "Organ/Leslie", mic: "e906", stand: "Short boom" },
+  { group: "Keys", label: "Acoustic Piano", mic: "Roswell MiniK47", stand: "Tall boom" },
   { group: "Strings/Horns", label: "Fiddle/Violin", mic: "Pro48 (active DI)", stand: "None", di: true },
   { group: "Strings/Horns", label: "Cello/Upright", mic: "Roswell MiniK47", stand: "Short boom" },
   { group: "Strings/Horns", label: "Sax", mic: "MD421 Kompakt", stand: "Tall boom" },
@@ -137,7 +139,8 @@ const buildChannelsFromSubmission = (sub) => {
     const who = m.name || "";
     switch (m.instrument) {
       case "Drums (full kit)":
-        add("Drums", "Kick", "Beta 52A", "Short boom", who);
+        add("Drums", "Kick In", "Beta 52A", "Short boom", who);
+        add("Drums", "Kick Out", "Beta 52A", "Short boom");
         add("Drums", "Snare Top", "SM57", "Drum clamp");
         add("Drums", "Snare Bottom", "e604 (clip)", "None");
         add("Drums", "Hi-Hat", "e614 (SDC)", "Short boom");
