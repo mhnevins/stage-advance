@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { storage } from "./lib/storage";
 import { useAuth } from "./lib/useAuth";
-import { loadMyInventory } from "./lib/inventory";
+import { listMyInventory, addInventoryItem, updateInventoryItem, removeInventoryItem } from "./lib/inventory";
 import { resolveOwnerBySlug } from "./lib/profile";
 import * as submissionsApi from "./lib/submissions";
 import Login from "./components/Login";
@@ -27,8 +27,9 @@ const GROUPS = {
   Other:    { color: "#C9C9C9", text: "#101215" },
 };
 
-/* ——— Each engineer's locker now lives in Supabase (inventory_items),
-   loaded per-user into `inventory` state — see loadMyInventory(). ——— */
+/* ——— Each engineer's locker lives in Supabase (inventory_items),
+   loaded into `inventoryItems` state and managed from the Locker tab
+   — see src/lib/inventory.js and renderLocker() below. ——— */
 
 const EXTRA_OPTIONS = ["DI (passive)", "DI (active)", "Stereo DI", "Wireless HH", "Headset/Lav"];
 const RENTAL = "__rental";
@@ -217,9 +218,10 @@ export default function StageAdvance() {
   const legacyForm = LEGACY_FORM_RE.test(window.location.pathname);
   const standalone = Boolean(formSlug) || legacyForm;
 
-  const [mode, setMode] = useState(standalone ? "form" : "plan"); // 'plan' | 'form'
+  const [mode, setMode] = useState(standalone ? "form" : "plan"); // 'plan' | 'form' | 'locker'
   const [shows, setShows] = useState([]);
-  const [inventory, setInventory] = useState({});
+  const [inventoryItems, setInventoryItems] = useState([]);
+  const [inventoryErr, setInventoryErr] = useState("");
   const [activeId, setActiveId] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -227,6 +229,8 @@ export default function StageAdvance() {
   const [printMsg, setPrintMsg] = useState("");
   const [customName, setCustomName] = useState("");
   const [customGroup, setCustomGroup] = useState("Other");
+  const [lockerLabelDraft, setLockerLabelDraft] = useState("");
+  const [lockerQtyDraft, setLockerQtyDraft] = useState("1");
   const [dragIdx, setDragIdx] = useState(null);
   const [overIdx, setOverIdx] = useState(null);
   const [submissions, setSubmissions] = useState([]);
@@ -238,8 +242,42 @@ export default function StageAdvance() {
   const [formOwnerStatus, setFormOwnerStatus] = useState(formSlug ? "loading" : "n/a");
   const saveTimer = useRef(null);
 
+  const inventory = {};
+  inventoryItems.forEach((i) => { inventory[i.label] = i.qty; });
   const MIC_OPTIONS = [...Object.keys(inventory), ...EXTRA_OPTIONS];
   const isRental = (mic) => mic !== "" && !MIC_OPTIONS.includes(mic);
+
+  const loadInventory = () => listMyInventory().then(setInventoryItems).catch(() => setInventoryItems([]));
+
+  const addLockerItem = async (label, qty) => {
+    if (!label.trim()) return;
+    setInventoryErr("");
+    try {
+      const row = await addInventoryItem(label.trim(), qty);
+      setInventoryItems((prev) => [...prev, row].sort((a, b) => a.label.localeCompare(b.label)));
+    } catch (e) {
+      setInventoryErr(e.code === "23505"
+        ? `You already have "${label.trim()}" in your locker — edit its quantity instead.`
+        : "Couldn't add that item — please try again.");
+    }
+  };
+
+  const updateLockerItem = async (id, patch) => {
+    setInventoryItems((prev) => prev.map((i) => (i.id === id ? { ...i, ...patch } : i)));
+    try { await updateInventoryItem(id, patch); }
+    catch (e) {
+      setInventoryErr(e.code === "23505"
+        ? "That name is already used by another item in your locker."
+        : "Couldn't save that change — please try again.");
+      loadInventory();
+    }
+  };
+
+  const removeLockerItem = async (id) => {
+    setInventoryItems((prev) => prev.filter((i) => i.id !== id));
+    try { await removeInventoryItem(id); }
+    catch (e) { setInventoryErr("Couldn't remove that item — please try again."); loadInventory(); }
+  };
 
   /* ——— resolve the Band Form owner from the URL slug (public, no login needed) ——— */
   useEffect(() => {
@@ -261,7 +299,7 @@ export default function StageAdvance() {
 
   /* ——— load shows + inventory (personal, per signed-in user) ——— */
   useEffect(() => {
-    if (!user) { setShows([]); setInventory({}); setLoaded(false); return; }
+    if (!user) { setShows([]); setInventoryItems([]); setLoaded(false); return; }
     (async () => {
       try {
         const r = await storage.get(STORAGE_KEY);
@@ -270,7 +308,7 @@ export default function StageAdvance() {
       } catch (e) { setShows([]); }
       setLoaded(true);
     })();
-    loadMyInventory().then(setInventory).catch(() => setInventory({}));
+    loadInventory();
   }, [user]);
 
   /* ——— save shows (debounced) ——— */
@@ -820,6 +858,13 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
         ))}
       </div>
 
+      {inventoryItems.length === 0 && (
+        <div className="sa-card" style={{ cursor: "pointer", borderColor: "#E8B93E" }} onClick={() => setMode("locker")}>
+          <div style={{ fontWeight: 700, color: "#E8B93E" }}>Your locker is empty</div>
+          <div className="sa-sub">Add your mics and DIs so mic pulls and shortage warnings actually mean something — tap here to set it up →</div>
+        </div>
+      )}
+
       <button className="sa-btn primary" style={{ alignSelf: "start", width: "fit-content" }}
         onClick={() => { const s = newShow(); setShows((p) => [s, ...p]); setActiveId(s.id); }}>
         + New show
@@ -842,6 +887,60 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
           </div>
         </div>
       ))}
+    </div>
+  );
+
+  const submitLockerDraft = () => {
+    const label = lockerLabelDraft.trim();
+    if (!label) return;
+    const qty = Math.max(0, Number(lockerQtyDraft) || 0);
+    addLockerItem(label, qty);
+    setLockerLabelDraft("");
+    setLockerQtyDraft("1");
+  };
+
+  const renderLocker = () => (
+    <div className="sa-grid" style={{ maxWidth: 640, margin: "0 auto" }}>
+      <div className="sa-card">
+        <h2 className="sa-h2">Your locker</h2>
+        <div className="sa-sub" style={{ marginBottom: 14 }}>
+          The mics and DIs you own. This drives the "Your locker" list when building input lists,
+          plus mic-pull and shortage warnings.
+        </div>
+
+        {inventoryItems.length === 0 ? (
+          <div className="sa-sub">
+            Your locker is empty — add your first mic or DI below to get started.
+          </div>
+        ) : (
+          inventoryItems.map((i) => (
+            <div key={i.id} className="sa-member" style={{ gridTemplateColumns: "1fr 90px auto" }}>
+              <input className="sa-input" value={i.label}
+                onChange={(e) => setInventoryItems((prev) => prev.map((x) => (x.id === i.id ? { ...x, label: e.target.value } : x)))}
+                onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== i.label) updateLockerItem(i.id, { label: v }); }} />
+              <input className="sa-input" type="number" min="0" value={i.qty}
+                onChange={(e) => {
+                  const qty = Math.max(0, Number(e.target.value) || 0);
+                  setInventoryItems((prev) => prev.map((x) => (x.id === i.id ? { ...x, qty } : x)));
+                }}
+                onBlur={(e) => updateLockerItem(i.id, { qty: Math.max(0, Number(e.target.value) || 0) })} />
+              <button className="sa-btn ghost danger" title="Remove" onClick={() => removeLockerItem(i.id)}>✕</button>
+            </div>
+          ))
+        )}
+
+        {inventoryErr && <div className="sa-shortbanner" style={{ marginTop: 10 }}>{inventoryErr}</div>}
+
+        <div className="sa-member" style={{ gridTemplateColumns: "1fr 90px auto", marginTop: 14 }}>
+          <input className="sa-input" value={lockerLabelDraft} placeholder="e.g. SM57"
+            onChange={(e) => setLockerLabelDraft(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && submitLockerDraft()} />
+          <input className="sa-input" type="number" min="0" value={lockerQtyDraft}
+            onChange={(e) => setLockerQtyDraft(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && submitLockerDraft()} />
+          <button className="sa-btn primary" onClick={submitLockerDraft}>+ Add</button>
+        </div>
+      </div>
     </div>
   );
 
@@ -1173,6 +1272,7 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
             <div className="sa-tabs no-print" style={{ alignItems: "center" }}>
               <div className="sa-sub" style={{ marginRight: 4 }}>Signed in as {user.email}</div>
               <button className={`sa-tab${mode === "plan" ? " on" : ""}`} onClick={() => setMode("plan")}>Planner</button>
+              <button className={`sa-tab${mode === "locker" ? " on" : ""}`} onClick={() => setMode("locker")}>Locker</button>
               <button className={`sa-tab${mode === "form" ? " on" : ""}`} onClick={() => { setMode("form"); setFormDone(false); }}>Band Form</button>
               <button className="sa-tab" onClick={signOut}>Sign out</button>
             </div>
@@ -1196,7 +1296,7 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
         ) : !standalone && !user ? (
           <Login onSignIn={signInWithEmail} />
         ) : (
-          mode === "form" ? renderForm() : active ? renderShow() : renderShowList()
+          mode === "form" ? renderForm() : mode === "locker" ? renderLocker() : active ? renderShow() : renderShowList()
         )}
       </div>
       {active && mode === "plan" && !standalone && user && renderPrintSheet()}

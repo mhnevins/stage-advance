@@ -1,23 +1,50 @@
 /*
  * Each engineer's mic/DI locker, stored as real rows in
- * `inventory_items` (owner_id, label, qty) rather than a JSON blob —
- * Phase 2 adds per-item add/edit/remove UI on top of this. For now
- * App.jsx just needs the whole locker reduced into the same
- * `{ label: qty }` shape the rendering code already expects.
+ * `inventory_items` (id, owner_id, label, qty). Scoped implicitly by
+ * RLS (owner_id = auth.uid()) — no explicit filtering needed here.
  */
 
 import { requireSupabase } from "./supabaseClient";
 
-export async function loadMyInventory() {
+export async function listMyInventory() {
   const supabase = requireSupabase();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return {};
+  if (!user) return [];
   const { data, error } = await supabase
     .from("inventory_items")
-    .select("label, qty")
-    .eq("owner_id", user.id);
+    .select("id, label, qty")
+    .order("label", { ascending: true });
   if (error) throw error;
-  const inventory = {};
-  (data || []).forEach((row) => { inventory[row.label] = row.qty; });
-  return inventory;
+  return data || [];
+}
+
+export async function addInventoryItem(label, qty) {
+  const supabase = requireSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not signed in.");
+  const { data, error } = await supabase
+    .from("inventory_items")
+    .insert({ owner_id: user.id, label, qty })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateInventoryItem(id, patch) {
+  const supabase = requireSupabase();
+  const { data, error } = await supabase
+    .from("inventory_items")
+    .update(patch)
+    .eq("id", id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function removeInventoryItem(id) {
+  const supabase = requireSupabase();
+  const { error } = await supabase.from("inventory_items").delete().eq("id", id);
+  if (error) throw error;
 }
