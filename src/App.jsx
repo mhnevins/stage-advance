@@ -1,11 +1,18 @@
 import { useState, useEffect, useRef } from "react";
 import { storage } from "./lib/storage";
+import { useAuth } from "./lib/useAuth";
+import { loadMyInventory } from "./lib/inventory";
+import { resolveOwnerBySlug } from "./lib/profile";
+import * as submissionsApi from "./lib/submissions";
+import Login from "./components/Login";
 
 /* ————————————————————————————————————————————————
    STAGE ADVANCE v3 — input list & gear planner for live sound
-   Modes: PLANNER (engineer) + BAND FORM (questionnaire).
-   Band submissions land in a shared inbox and can be imported
-   as draft input lists built from the engineer's locker.
+   Modes: PLANNER (engineer, requires sign-in) + BAND FORM (public,
+   /form/{engineer's slug}). Each engineer has their own locker, shows,
+   and questionnaire inbox — see src/lib/ and supabase/migrations/.
+   Band submissions land in that engineer's own inbox and can be
+   imported as draft input lists built from their locker.
    ———————————————————————————————————————————————— */
 
 const GROUPS = {
@@ -20,30 +27,11 @@ const GROUPS = {
   Other:    { color: "#C9C9C9", text: "#101215" },
 };
 
-/* ——— Your locker: label → quantity owned ——— */
-const INVENTORY = {
-  "e604 (clip)": 6,
-  "e614 (SDC)": 1,
-  "sE7 (SDC)": 4,           // 2 matched pairs
-  "SM57": 2,
-  "Beta 52A": 1,
-  "Audix D6": 1,
-  "Telefunken M82": 1,
-  "Roswell MiniK47": 2,
-  "e906": 1,
-  "MD421 Kompakt": 2,
-  "AT2020": 1,
-  "SM58": 5,
-  "e845": 1,
-  "e945": 1,
-  "Pro48 (active DI)": 1,
-  "SB-2 (passive DI)": 3,
-};
+/* ——— Each engineer's locker now lives in Supabase (inventory_items),
+   loaded per-user into `inventory` state — see loadMyInventory(). ——— */
 
 const EXTRA_OPTIONS = ["DI (passive)", "DI (active)", "Stereo DI", "Wireless HH", "Headset/Lav"];
-const MIC_OPTIONS = [...Object.keys(INVENTORY), ...EXTRA_OPTIONS];
 const RENTAL = "__rental";
-const isRental = (mic) => mic !== "" && !MIC_OPTIONS.includes(mic);
 
 const CONDENSERS = ["e614 (SDC)", "sE7 (SDC)", "Roswell MiniK47", "AT2020"];
 const needsPhantom = (mic) =>
@@ -114,7 +102,6 @@ const blankForm = () => ({
 });
 
 const STORAGE_KEY = "stage-advance:shows";
-const SUBMISSIONS_KEY = "stage-advance:submissions";
 const GROUP_ORDER = Object.keys(GROUPS);
 
 const groupSort = (channels) =>
@@ -219,12 +206,20 @@ const submissionToShow = (sub) => {
   };
 };
 
-const isBandFormRoute = () => /^\/band-form\/?$/.test(window.location.pathname);
+const FORM_SLUG_RE = /^\/form\/([a-zA-Z0-9-]+)\/?$/;
+const LEGACY_FORM_RE = /^\/band-form\/?$/;
 
 export default function StageAdvance() {
-  const standalone = isBandFormRoute();
+  const { user, profile, loading: authLoading, signInWithEmail, signOut } = useAuth();
+
+  const formMatch = window.location.pathname.match(FORM_SLUG_RE);
+  const formSlug = formMatch ? formMatch[1] : null;
+  const legacyForm = LEGACY_FORM_RE.test(window.location.pathname);
+  const standalone = Boolean(formSlug) || legacyForm;
+
   const [mode, setMode] = useState(standalone ? "form" : "plan"); // 'plan' | 'form'
   const [shows, setShows] = useState([]);
+  const [inventory, setInventory] = useState({});
   const [activeId, setActiveId] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -239,19 +234,44 @@ export default function StageAdvance() {
   const [formDone, setFormDone] = useState(false);
   const [formErr, setFormErr] = useState("");
   const [inboxMsg, setInboxMsg] = useState("");
+  const [formOwner, setFormOwner] = useState(null);
+  const [formOwnerStatus, setFormOwnerStatus] = useState(formSlug ? "loading" : "n/a");
   const saveTimer = useRef(null);
 
-  /* ——— load shows (personal) ——— */
+  const MIC_OPTIONS = [...Object.keys(inventory), ...EXTRA_OPTIONS];
+  const isRental = (mic) => mic !== "" && !MIC_OPTIONS.includes(mic);
+
+  /* ——— resolve the Band Form owner from the URL slug (public, no login needed) ——— */
   useEffect(() => {
+    if (!formSlug) return;
+    let stillMounted = true;
+    setFormOwnerStatus("loading");
+    resolveOwnerBySlug(formSlug)
+      .then((owner) => {
+        if (!stillMounted) return;
+        setFormOwner(owner);
+        setFormOwnerStatus(owner ? "found" : "not-found");
+      })
+      .catch(() => { if (stillMounted) setFormOwnerStatus("not-found"); });
+    return () => { stillMounted = false; };
+  }, [formSlug]);
+
+  /* the engineer previewing their own form in-app posts to their own profile */
+  const effectiveFormOwner = formSlug ? formOwner : profile;
+
+  /* ——— load shows + inventory (personal, per signed-in user) ——— */
+  useEffect(() => {
+    if (!user) { setShows([]); setInventory({}); setLoaded(false); return; }
     (async () => {
       try {
         const r = await storage.get(STORAGE_KEY);
         if (r?.value) setShows(JSON.parse(r.value));
-      } catch (e) { /* first run */ }
+        else setShows([]);
+      } catch (e) { setShows([]); }
       setLoaded(true);
-      loadSubmissions();
     })();
-  }, []);
+    loadMyInventory().then(setInventory).catch(() => setInventory({}));
+  }, [user]);
 
   /* ——— save shows (debounced) ——— */
   useEffect(() => {
@@ -264,26 +284,22 @@ export default function StageAdvance() {
     return () => clearTimeout(saveTimer.current);
   }, [shows, loaded]);
 
-  /* ——— submissions (shared storage) ——— */
+  /* ——— submissions (this engineer's inbox) ——— */
   const loadSubmissions = async () => {
-    try {
-      const r = await storage.get(SUBMISSIONS_KEY, true);
-      setSubmissions(r?.value ? JSON.parse(r.value) : []);
-    } catch (e) { setSubmissions([]); }
+    if (!user) { setSubmissions([]); return; }
+    try { setSubmissions(await submissionsApi.listMine()); }
+    catch (e) { setSubmissions([]); }
   };
+
+  useEffect(() => { loadSubmissions(); }, [user]);
 
   const submitForm = async () => {
     if (!form.band.trim()) { setFormErr("Band name is required."); return; }
     if (!form.email.trim() && !form.phone.trim()) { setFormErr("Please include an email or phone number."); return; }
+    if (!effectiveFormOwner) { setFormErr("This form link isn't set up correctly — ask your engineer for a fresh link."); return; }
     setFormErr("");
-    const sub = { ...form, id: uid(), submittedAt: new Date().toLocaleString() };
     try {
-      let existing = [];
-      try {
-        const r = await storage.get(SUBMISSIONS_KEY, true);
-        if (r?.value) existing = JSON.parse(r.value);
-      } catch (e) { /* none yet */ }
-      await storage.set(SUBMISSIONS_KEY, JSON.stringify([sub, ...existing]), true);
+      await submissionsApi.submitPublic(effectiveFormOwner.id, form);
       setFormDone(true);
     } catch (e) {
       setFormErr("Couldn't submit — please try again.");
@@ -291,10 +307,9 @@ export default function StageAdvance() {
   };
 
   const removeSubmission = async (id) => {
-    const next = submissions.filter((s) => s.id !== id);
-    setSubmissions(next);
-    try { await storage.set(SUBMISSIONS_KEY, JSON.stringify(next), true); }
-    catch (e) { console.error(e); }
+    setSubmissions((prev) => prev.filter((s) => s.id !== id));
+    try { await submissionsApi.removeMine(id); }
+    catch (e) { console.error(e); loadSubmissions(); }
   };
 
   const importSubmission = (sub) => {
@@ -385,7 +400,7 @@ export default function StageAdvance() {
   const micCounts = active ? tally(active.channels, (c) => c.mic) : [];
   const standCounts = active ? tally(active.channels, (c) => c.stand) : [];
   const phantomCh = active ? active.channels.map((c, i) => (c.phantom ? i + 1 : null)).filter(Boolean) : [];
-  const shortages = micCounts.filter(([k, v]) => INVENTORY[k] !== undefined && v > INVENTORY[k]);
+  const shortages = micCounts.filter(([k, v]) => inventory[k] !== undefined && v > inventory[k]);
 
   /* duplicate stage box lines: effective value is override ?? channel number */
   const sbMap = {};
@@ -415,7 +430,7 @@ export default function StageAdvance() {
       out += `TO RENT:  ${rentals.map(([k, v]) => `${v}× ${k}`).join(", ")}\n`;
     out += `STANDS:   ${standCounts.map(([k, v]) => `${v}× ${k}`).join(", ") || "—"}\n`;
     if (shortages.length)
-      out += `⚠ SHORT:  ${shortages.map(([k, v]) => `${k} (need ${v}, own ${INVENTORY[k]})`).join(", ")}\n`;
+      out += `⚠ SHORT:  ${shortages.map(([k, v]) => `${k} (need ${v}, own ${inventory[k]})`).join(", ")}\n`;
     if (sbDupes.length)
       out += `⚠ SB DUPES: ${sbDupes.map(([line, chs]) => `line ${line} → CH ${chs.join(" & ")}`).join(", ")}\n`;
     if (active.monitors) out += `MONITORS: ${active.monitors}\n`;
@@ -453,7 +468,7 @@ export default function StageAdvance() {
         <td class="num" style="width:auto">${c.stagebox ?? i + 1}</td>
       </tr>`).join("");
 
-    const line = ([k, v]) => `<div class="line"><span>${esc(k)}${isRental(k) ? " (RENTAL)" : ""}</span><b>${v}${INVENTORY[k] !== undefined ? ` / ${INVENTORY[k]}` : ""}</b></div>`;
+    const line = ([k, v]) => `<div class="line"><span>${esc(k)}${isRental(k) ? " (RENTAL)" : ""}</span><b>${v}${inventory[k] !== undefined ? ` / ${inventory[k]}` : ""}</b></div>`;
 
     return `<!DOCTYPE html><html><head><meta charset="utf-8">
 <title>Input List — ${esc(active.band || "Untitled")}</title>
@@ -490,7 +505,7 @@ export default function StageAdvance() {
   ${active.monitors ? `<div><b>Monitors</b>${esc(active.monitors)}</div>` : ""}
   <div><b>Channels</b>${active.channels.length}</div>
 </div>
-${shortages.length ? `<div class="alert">⚠ OVER INVENTORY: ${shortages.map(([k, v]) => `${esc(k)} — need ${v}, own ${INVENTORY[k]}`).join(" · ")}</div>` : ""}
+${shortages.length ? `<div class="alert">⚠ OVER INVENTORY: ${shortages.map(([k, v]) => `${esc(k)} — need ${v}, own ${inventory[k]}`).join(" · ")}</div>` : ""}
 ${sbDupes.length ? `<div class="alert">⚠ STAGE BOX CONFLICTS: ${sbDupes.map(([line, chs]) => `line ${line} → CH ${chs.join(" & ")}`).join(" · ")}</div>` : ""}
 <table><thead><tr><th>CH</th><th>Source</th><th>Mic / DI</th><th>Stand</th><th style="text-align:center">48V</th><th>Notes</th><th style="text-align:right">Stage Box</th></tr></thead>
 <tbody>${rows}</tbody></table>
@@ -746,9 +761,8 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
           </div>
 
           <div className="sa-privacy">
-            Heads up: this is a prototype. Submissions are stored in this app's shared space and could be
-            visible to others with this link — please don't include sensitive personal info beyond your
-            show contact details.
+            Your info goes only to your sound engineer for planning this show — please don't include
+            sensitive personal info beyond your show contact details.
           </div>
 
           {formErr && <div className="sa-shortbanner">{formErr}</div>}
@@ -771,8 +785,10 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
           </h2>
           <button
             className="sa-btn ghost"
+            disabled={!profile}
             onClick={() => {
-              navigator.clipboard.writeText(`${window.location.origin}/band-form`);
+              if (!profile) return;
+              navigator.clipboard.writeText(`${window.location.origin}/form/${profile.slug}`);
               setLinkCopied(true);
               setTimeout(() => setLinkCopied(false), 1600);
             }}
@@ -943,8 +959,8 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
                       else updateChannel(c.id, { mic: v, phantom: needsPhantom(v) ? true : c.phantom });
                     }}>
                     <optgroup label="Your locker">
-                      {Object.keys(INVENTORY).map((m) => (
-                        <option key={m} value={m}>{m} · own {INVENTORY[m]}</option>
+                      {Object.keys(inventory).map((m) => (
+                        <option key={m} value={m}>{m} · own {inventory[m]}</option>
                       ))}
                     </optgroup>
                     <optgroup label="DI / Wireless">
@@ -997,7 +1013,7 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
       {/* Shortage warning */}
       {shortages.length > 0 && (
         <div className="sa-shortbanner">
-          ⚠ Over inventory: {shortages.map(([k, v]) => `${k} — need ${v}, own ${INVENTORY[k]}`).join(" · ")}. Swap mics or plan a rental.
+          ⚠ Over inventory: {shortages.map(([k, v]) => `${k} — need ${v}, own ${inventory[k]}`).join(" · ")}. Swap mics or plan a rental.
         </div>
       )}
 
@@ -1016,7 +1032,7 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
             <div className="sa-groupname">Mics & DIs</div>
             {micCounts.length === 0 && <div className="sa-sub">—</div>}
             {micCounts.map(([k, v]) => {
-              const own = INVENTORY[k];
+              const own = inventory[k];
               const short = own !== undefined && v > own;
               return (
                 <div key={k} className={`sa-sum-item${short ? " short" : ""}`}>
@@ -1065,7 +1081,7 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
 
       {shortages.length > 0 && (
         <div className="ps-alert">
-          ⚠ OVER INVENTORY: {shortages.map(([k, v]) => `${k} — need ${v}, own ${INVENTORY[k]}`).join(" · ")}
+          ⚠ OVER INVENTORY: {shortages.map(([k, v]) => `${k} — need ${v}, own ${inventory[k]}`).join(" · ")}
         </div>
       )}
 
@@ -1107,7 +1123,7 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
           {micCounts.map(([k, v]) => (
             <div key={k} className="ps-line">
               <span>{k}{isRental(k) ? " (RENTAL)" : ""}</span>
-              <b>{v}{INVENTORY[k] !== undefined ? ` / ${INVENTORY[k]}` : ""}</b>
+              <b>{v}{inventory[k] !== undefined ? ` / ${inventory[k]}` : ""}</b>
             </div>
           ))}
         </div>
@@ -1153,17 +1169,37 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
             <div className="sa-logo">Stage<span>Advance</span></div>
             <div className="sa-sub">input lists · mic pulls · stand counts — before you load the van</div>
           </div>
-          {!standalone && (
-            <div className="sa-tabs no-print">
+          {!standalone && user && (
+            <div className="sa-tabs no-print" style={{ alignItems: "center" }}>
+              <div className="sa-sub" style={{ marginRight: 4 }}>Signed in as {user.email}</div>
               <button className={`sa-tab${mode === "plan" ? " on" : ""}`} onClick={() => setMode("plan")}>Planner</button>
               <button className={`sa-tab${mode === "form" ? " on" : ""}`} onClick={() => { setMode("form"); setFormDone(false); }}>Band Form</button>
+              <button className="sa-tab" onClick={signOut}>Sign out</button>
             </div>
           )}
         </div>
 
-        {mode === "form" ? renderForm() : active ? renderShow() : renderShowList()}
+        {legacyForm ? (
+          <div className="sa-card" style={{ maxWidth: 480, margin: "60px auto", textAlign: "center", padding: 32 }}>
+            <h2 className="sa-h2">This link has moved</h2>
+            <div className="sa-sub">Ask your sound engineer for their current Band Form link.</div>
+          </div>
+        ) : standalone && formOwnerStatus === "loading" ? (
+          <div className="sa-sub" style={{ textAlign: "center", margin: 60 }}>Loading…</div>
+        ) : standalone && formOwnerStatus === "not-found" ? (
+          <div className="sa-card" style={{ maxWidth: 480, margin: "60px auto", textAlign: "center", padding: 32 }}>
+            <h2 className="sa-h2">This form link isn't valid</h2>
+            <div className="sa-sub">Ask your sound engineer for their current Band Form link.</div>
+          </div>
+        ) : !standalone && authLoading ? (
+          <div className="sa-sub" style={{ textAlign: "center", margin: 60 }}>Loading…</div>
+        ) : !standalone && !user ? (
+          <Login onSignIn={signInWithEmail} />
+        ) : (
+          mode === "form" ? renderForm() : active ? renderShow() : renderShowList()
+        )}
       </div>
-      {active && mode === "plan" && renderPrintSheet()}
+      {active && mode === "plan" && !standalone && user && renderPrintSheet()}
     </div>
   );
 }

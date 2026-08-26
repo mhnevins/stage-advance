@@ -4,49 +4,40 @@ Input list & gear planner for live sound — built for advancing shows,
 tracking your mic locker, generating a band questionnaire, and printing
 a clean crew sheet.
 
-## What changed from the Claude artifact
+## Multi-tenant model
 
-The artifact version used `window.storage`, an API that only exists inside
-Claude.ai. This project replaces it with `src/lib/storage.js`:
+StageAdvance supports multiple engineers, each with their own private
+locker, shows, and Band Form inbox — enforced at the database level via
+Supabase Auth + Postgres Row Level Security, not just hidden in the UI.
 
-- **Planner (your shows):** stays in the browser's `localStorage` — only
-  you ever touch this data, on your own device.
-- **Band Form submissions inbox:** backed by a real [Supabase](https://supabase.com)
-  table (`kv_shared`), so a band leader's submission from their own phone
-  actually reaches your inbox, from any device.
+- **Sign in:** magic link (email, no password) via Supabase Auth.
+- **Planner data (shows, locker):** per-user tables (`kv_user`,
+  `inventory_items`), only readable/writable by the signed-in owner.
+- **Band Form:** each engineer gets a unique `/form/{slug}` link. A band
+  leader fills it out logged out; their answers land only in that
+  engineer's inbox (`submissions` table).
 
-There's also a standalone `/band-form` URL — it shows only the
-questionnaire, with no Planner tab or link, safe to hand to a band leader.
+See `src/lib/` (`storage.js`, `inventory.js`, `submissions.js`,
+`profile.js`, `useAuth.js`) and `supabase/migrations/0001_multi_tenant.sql`
+for the implementation.
 
-## 1. Set up Supabase (for the Band Form inbox)
+## 1. Set up Supabase
 
 1. Create a free project at [supabase.com](https://supabase.com).
-2. In the SQL Editor, run:
-
-   ```sql
-   create table if not exists kv_shared (
-     key text primary key,
-     value text not null,
-     updated_at timestamptz not null default now()
-   );
-
-   alter table kv_shared enable row level security;
-
-   create policy "public read" on kv_shared for select using (true);
-   create policy "public insert" on kv_shared for insert with check (true);
-   create policy "public update" on kv_shared for update using (true);
-   create policy "public delete" on kv_shared for delete using (true);
-   ```
-
-   These policies allow open read/write via the public (anon/publishable)
-   key — matching the original artifact's shared-storage model (no auth).
-   Anyone with the key could write to this table; that's an acceptable
-   tradeoff for a low-stakes mic-list inbox, but don't reuse this table
-   for anything sensitive.
-3. In **Settings → API Keys**, copy your Project URL and the publishable
+2. In the SQL Editor, run the contents of
+   `supabase/migrations/0001_multi_tenant.sql` — it creates `profiles`,
+   `kv_user`, `inventory_items`, and `submissions`, all with RLS policies
+   scoped to `auth.uid()`.
+3. **Authentication → URL Configuration → Redirect URLs:** add
+   `http://localhost:5173` and your deployed URL, or magic-link sign-in
+   will fail.
+4. In **Settings → API Keys**, copy your Project URL and the publishable
    (`sb_publishable_...`) key.
-4. Copy `.env.example` to `.env.local` and fill in those two values.
+5. Copy `.env.example` to `.env.local` and fill in those two values.
    `.env.local` is gitignored — never commit real keys.
+6. Sign in once with your own email, then (optionally) run the seed
+   insert at the bottom of the migration file — commented out — to give
+   your account a starting locker instead of an empty one.
 
 ## 2. Run it locally
 
@@ -58,9 +49,9 @@ npm install
 npm run dev
 ```
 
-Open the URL it prints (usually `http://localhost:5173`). Click around,
-create a show, try the Band Form. Planner data saves to localStorage;
-Band Form submissions go to Supabase.
+Open the URL it prints (usually `http://localhost:5173`). Sign in with your
+email (you'll get a magic link), create a show, try the Band Form. Shows,
+locker, and submissions all live in Supabase, scoped to your account.
 
 ## 3. Put it on GitHub
 
@@ -98,9 +89,10 @@ git push -u origin main
 
 Every time you `git push`, Netlify rebuilds and redeploys automatically.
 
-Share `https://your-site.netlify.app/band-form` with a band leader —
-it's a standalone page with no Planner access. Or click **"Copy band
-form link"** in the app's inbox card.
+Once signed in, click **"Copy band form link"** in the inbox card to get
+your personal `https://your-site.netlify.app/form/{your-slug}` URL — share
+that with a band leader. It's a standalone page with no Planner access,
+and submissions land only in your inbox.
 
 ### Alternative: Vercel
 
@@ -141,10 +133,20 @@ stage-advance/
 ├── vite.config.js
 ├── .env.example         # copy to .env.local and fill in Supabase values
 ├── public/
-│   └── _redirects        # Netlify SPA fallback (needed for /band-form)
+│   └── _redirects        # Netlify SPA fallback (needed for /form/{slug})
+├── supabase/
+│   └── migrations/
+│       └── 0001_multi_tenant.sql  # schema + RLS, run once in the SQL editor
 ├── src/
-│   ├── main.jsx        # React entry point
-│   ├── App.jsx          # the whole app (from the Claude artifact)
+│   ├── main.jsx           # React entry point
+│   ├── App.jsx            # the whole app (from the Claude artifact)
+│   ├── components/
+│   │   └── Login.jsx      # magic-link sign-in screen
 │   └── lib/
-│       └── storage.js   # localStorage (personal) + Supabase (shared) shim
+│       ├── supabaseClient.js  # shared Supabase client
+│       ├── useAuth.js         # session/profile hook
+│       ├── profile.js         # slug <-> owner id resolution
+│       ├── storage.js         # per-user kv_user shim (shows)
+│       ├── inventory.js       # per-user locker (inventory_items)
+│       └── submissions.js     # Band Form inbox (submissions)
 ```
