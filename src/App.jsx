@@ -51,6 +51,46 @@ const USE_CASE_OPTIONS = [
   "di-passive", "di-active",
 ];
 
+/* ——— Phase 4a: parse one line of a pasted mic list into {label, qty}.
+   Generous, not exhaustive — anything that doesn't match a quantity
+   pattern just becomes a bare label at qty 1; the review screen is the
+   safety net for anything mis-split. ——— */
+const parseLockerPasteLine = (raw) => {
+  let line = raw.trim();
+  if (!line) return null;
+  line = line.replace(/^[-•*]\s+/, "").replace(/^\d+[.)]\s+/, "").trim();
+  if (!line) return null;
+
+  let m = line.match(/^(.+?)\t+(\d+)$/) || line.match(/^(.+?)\s{2,}(\d+)$/);
+  if (m) return { label: m[1].trim(), qty: parseInt(m[2], 10) };
+
+  m = line.match(/^(\d+)\s*[x×]\s*(.+)$/i);
+  if (m) return { label: m[2].trim(), qty: parseInt(m[1], 10) };
+
+  m = line.match(/^(.+?)\s*[x×]\s*(\d+)$/i);
+  if (m) return { label: m[1].trim(), qty: parseInt(m[2], 10) };
+
+  m = line.match(/^(.+?)\s*\((\d+)\)$/);
+  if (m) return { label: m[1].trim(), qty: parseInt(m[2], 10) };
+
+  m = line.match(/^(.+?)\s*[-:,]\s*(\d+)$/);
+  if (m) return { label: m[1].trim(), qty: parseInt(m[2], 10) };
+
+  return { label: line, qty: 1 };
+};
+
+/* Runs `fn` over `items` with at most `size` in flight at once. Used to
+   keep bulk AI-recognition calls from either running one-at-a-time
+   (slow) or all at once (hammers the lookup function/API). */
+const chunkedMap = async (items, size, fn) => {
+  const results = [];
+  for (let i = 0; i < items.length; i += size) {
+    const chunk = items.slice(i, i + size);
+    results.push(...await Promise.all(chunk.map(fn)));
+  }
+  return results;
+};
+
 /* Defaults chosen from your inventory */
 const CATALOG = [
   { group: "Drums", label: "Kick In", mic: "Beta 52A", stand: "Short boom" },
@@ -245,6 +285,10 @@ export default function StageAdvance() {
   const [lockerLookup, setLockerLookup] = useState(null); // { label, qty, type, needs_phantom, use_cases, fromAi } while reviewing
   const [lockerLookupBusy, setLockerLookupBusy] = useState(false);
   const [rowLookupBusyId, setRowLookupBusyId] = useState(null);
+  const [showPastePanel, setShowPastePanel] = useState(false);
+  const [pasteText, setPasteText] = useState("");
+  const [pasteBusy, setPasteBusy] = useState(false);
+  const [pasteReview, setPasteReview] = useState(null); // { items: [{label, qty, type, needs_phantom, use_cases, status, selected}] }
   const [dragIdx, setDragIdx] = useState(null);
   const [overIdx, setOverIdx] = useState(null);
   const [submissions, setSubmissions] = useState([]);
@@ -973,6 +1017,78 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
     }
   };
 
+  /* ——— Phase 4a: bulk paste import ——— */
+  const startPasteImport = async () => {
+    const lines = pasteText.split("\n").map(parseLockerPasteLine).filter(Boolean);
+    if (lines.length === 0) return;
+
+    const merged = new Map();
+    lines.forEach(({ label, qty }) => {
+      const key = label.toLowerCase();
+      const existing = merged.get(key);
+      if (existing) existing.qty += qty;
+      else merged.set(key, { label, qty });
+    });
+    const candidates = [...merged.values()];
+
+    const ownedLabels = new Set(inventoryItems.map((i) => i.label.toLowerCase()));
+    const already = candidates.filter((c) => ownedLabels.has(c.label.toLowerCase()));
+    const toLookup = candidates.filter((c) => !ownedLabels.has(c.label.toLowerCase()));
+
+    setPasteBusy(true);
+    setInventoryErr("");
+
+    const libraryResults = await chunkedMap(toLookup, 8, async (c) => {
+      try { return { ...c, known: await lookupMicLibrary(c.label) }; }
+      catch (e) { return { ...c, known: null }; }
+    });
+    const fromLibrary = libraryResults.filter((c) => c.known);
+    const needsAi = libraryResults.filter((c) => !c.known);
+
+    const aiResults = await chunkedMap(needsAi, 5, async (c) => {
+      try { return { ...c, ai: await fetchAiTagsForMic(c.label) }; }
+      catch (e) { return { ...c, ai: null }; }
+    });
+
+    const items = [
+      ...already.map((c) => ({
+        label: c.label, qty: c.qty, type: "", needs_phantom: false, use_cases: [],
+        status: "duplicate", selected: false,
+      })),
+      ...fromLibrary.map((c) => ({
+        label: c.label, qty: c.qty,
+        type: c.known.type, needs_phantom: c.known.needs_phantom, use_cases: c.known.use_cases || [],
+        status: "recognized", selected: true,
+      })),
+      ...aiResults.map((c) => c.ai
+        ? { label: c.label, qty: c.qty, type: c.ai.type, needs_phantom: c.ai.needsPhantom, use_cases: c.ai.useCases || [], status: "recognized", selected: true, fromAi: true }
+        : { label: c.label, qty: c.qty, type: "", needs_phantom: false, use_cases: [], status: "needs-input", selected: true }),
+    ];
+
+    setPasteReview({ items });
+    setPasteBusy(false);
+  };
+
+  const updatePasteReviewItem = (idx, patch) => {
+    setPasteReview((prev) => {
+      if (!prev) return prev;
+      return { ...prev, items: prev.items.map((it, i) => (i === idx ? { ...it, ...patch } : it)) };
+    });
+  };
+
+  const confirmPasteImport = async () => {
+    if (!pasteReview) return;
+    for (const item of pasteReview.items.filter((i) => i.selected)) {
+      await addLockerItem(item.label, item.qty, { type: item.type || null, needs_phantom: item.needs_phantom, use_cases: item.use_cases });
+      if (item.fromAi && item.type) {
+        cacheMicLibraryEntry(item.label, { type: item.type, needsPhantom: item.needs_phantom, useCases: item.use_cases }).catch(() => {});
+      }
+    }
+    setPasteReview(null);
+    setPasteText("");
+    setShowPastePanel(false);
+  };
+
   /* small reusable tag editor — used both in the add-review panel and per existing row */
   const renderTagFields = (tags, onChange) => (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginTop: 8 }}>
@@ -1075,6 +1191,58 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
             </button>
           </div>
         )}
+
+        <div style={{ marginTop: 18, paddingTop: 14, borderTop: "1px solid #2c2f37" }}>
+          {pasteReview ? (
+            <div className="sa-card" style={{ background: "#20242b" }}>
+              <div style={{ fontWeight: 700, marginBottom: 4 }}>Review your pasted list</div>
+              <div className="sa-sub" style={{ marginBottom: 10 }}>
+                {pasteReview.items.filter((i) => i.status === "recognized").length} of {pasteReview.items.length} recognized automatically
+                {pasteReview.items.some((i) => i.status === "duplicate") && `, ${pasteReview.items.filter((i) => i.status === "duplicate").length} already in your locker (unchecked)`}
+                {pasteReview.items.some((i) => i.status === "needs-input") && `, ${pasteReview.items.filter((i) => i.status === "needs-input").length} need your input`}.
+              </div>
+              {pasteReview.items.map((item, idx) => (
+                <div key={idx} style={{ padding: "8px 0", borderBottom: "1px dashed #2c2f37" }}>
+                  <div className="sa-member" style={{ gridTemplateColumns: "auto 1fr 90px", alignItems: "center" }}>
+                    <input type="checkbox" checked={item.selected}
+                      onChange={(e) => updatePasteReviewItem(idx, { selected: e.target.checked })} />
+                    <div>
+                      <b>{item.label}</b>
+                      {item.status === "duplicate" && <span className="sa-sub"> — already in your locker</span>}
+                      {item.status === "needs-input" && <span className="sa-sub"> — needs your input</span>}
+                    </div>
+                    <input className="sa-input" type="number" min="0" value={item.qty}
+                      onChange={(e) => updatePasteReviewItem(idx, { qty: Math.max(0, Number(e.target.value) || 0) })} />
+                  </div>
+                  {renderTagFields(item, (patch) => updatePasteReviewItem(idx, patch))}
+                </div>
+              ))}
+              <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                <button className="sa-btn primary" onClick={confirmPasteImport}>
+                  Import {pasteReview.items.filter((i) => i.selected).length} item{pasteReview.items.filter((i) => i.selected).length === 1 ? "" : "s"}
+                </button>
+                <button className="sa-btn ghost" onClick={() => setPasteReview(null)}>Cancel</button>
+              </div>
+            </div>
+          ) : showPastePanel ? (
+            <div>
+              <div className="sa-sub" style={{ marginBottom: 8 }}>
+                Paste your list below — one mic per line, quantities optional (e.g. "2x SM57" or "SM57 (2)").
+              </div>
+              <textarea className="sa-input" rows={8} value={pasteText}
+                placeholder={"SM57\n2x SM58\nBeta 52A (1)\n…"}
+                onChange={(e) => setPasteText(e.target.value)} />
+              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                <button className="sa-btn primary" onClick={startPasteImport} disabled={pasteBusy || !pasteText.trim()}>
+                  {pasteBusy ? "Recognizing…" : "Parse & review"}
+                </button>
+                <button className="sa-btn ghost" onClick={() => { setShowPastePanel(false); setPasteText(""); }}>Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <button className="sa-btn ghost" onClick={() => setShowPastePanel(true)}>📋 Paste a list</button>
+          )}
+        </div>
       </div>
     </div>
   );
