@@ -58,25 +58,31 @@ const USE_CASE_OPTIONS = [
 const parseLockerPasteLine = (raw) => {
   let line = raw.trim();
   if (!line) return null;
-  line = line.replace(/^[-•*]\s+/, "").replace(/^\d+[.)]\s+/, "").trim();
+  line = line.replace(/\/\/.*$/, "").trim(); // strip a trailing // comment
+  line = line.replace(/^[-•*]\s+/, "").replace(/^\d+[.)]\s+/, "").trim(); // strip list markers
+  line = line.replace(/[,;]\s*$/, "").trim(); // strip a trailing comma/semicolon
   if (!line) return null;
 
+  // strips wrapping quotes left over from a pasted `"Label": qty,`-style
+  // object literal (e.g. an old hardcoded inventory list)
+  const clean = (s) => s.trim().replace(/^["']+|["']+$/g, "").trim();
+
   let m = line.match(/^(.+?)\t+(\d+)$/) || line.match(/^(.+?)\s{2,}(\d+)$/);
-  if (m) return { label: m[1].trim(), qty: parseInt(m[2], 10) };
+  if (m) return { label: clean(m[1]), qty: parseInt(m[2], 10) };
 
   m = line.match(/^(\d+)\s*[x×]\s*(.+)$/i);
-  if (m) return { label: m[2].trim(), qty: parseInt(m[1], 10) };
+  if (m) return { label: clean(m[2]), qty: parseInt(m[1], 10) };
 
   m = line.match(/^(.+?)\s*[x×]\s*(\d+)$/i);
-  if (m) return { label: m[1].trim(), qty: parseInt(m[2], 10) };
+  if (m) return { label: clean(m[1]), qty: parseInt(m[2], 10) };
 
   m = line.match(/^(.+?)\s*\((\d+)\)$/);
-  if (m) return { label: m[1].trim(), qty: parseInt(m[2], 10) };
+  if (m) return { label: clean(m[1]), qty: parseInt(m[2], 10) };
 
   m = line.match(/^(.+?)\s*[-:,]\s*(\d+)$/);
-  if (m) return { label: m[1].trim(), qty: parseInt(m[2], 10) };
+  if (m) return { label: clean(m[1]), qty: parseInt(m[2], 10) };
 
-  return { label: line, qty: 1 };
+  return { label: clean(line), qty: 1 };
 };
 
 /* Runs `fn` over `items` with at most `size` in flight at once. Used to
