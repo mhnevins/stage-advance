@@ -1342,7 +1342,7 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
               <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
                 <div>
                   <button className="sa-btn ghost" onClick={() => setShowPastePanel(true)}>📋 Paste a list</button>
-                  <div className="sa-sub" style={{ fontSize: 11, marginTop: 4, maxWidth: 190 }}>
+                  <div className="sa-sub" style={{ fontSize: 11, marginTop: 4, maxWidth: 230 }}>
                     Paste your mic inventory as plain text
                   </div>
                 </div>
@@ -1356,8 +1356,9 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
                   <button className="sa-btn ghost" disabled={importBusy} onClick={() => fileInputRef.current.click()}>
                     {importBusy ? "Recognizing…" : "📁 Upload a file"}
                   </button>
-                  <div className="sa-sub" style={{ fontSize: 11, marginTop: 4, maxWidth: 190 }}>
-                    CSV or Excel (.csv, .xlsx) — one mic per row
+                  <div className="sa-sub" style={{ fontSize: 11, marginTop: 4, maxWidth: 230 }}>
+                    CSV or Excel (.csv, .xlsx) — 2 columns: mic model &amp; quantity
+                    (e.g. one row for all 5 SM58s, not 5 rows)
                   </div>
                 </div>
               </div>
