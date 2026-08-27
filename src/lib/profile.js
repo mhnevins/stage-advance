@@ -43,6 +43,20 @@ export async function ensureMyProfile(user) {
   throw new Error("Could not allocate a unique Band Form link after several attempts.");
 }
 
+export async function updateMyProfile(patch) {
+  const client = requireSupabase();
+  const { data: { user } } = await client.auth.getUser();
+  if (!user) throw new Error("Not signed in.");
+  const { data, error } = await client
+    .from("profiles")
+    .update(patch)
+    .eq("id", user.id)
+    .select()
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
 export async function resolveOwnerBySlug(slug) {
   if (!slug || !supabase) return null;
   const { data, error } = await supabase

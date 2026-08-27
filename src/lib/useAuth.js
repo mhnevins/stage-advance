@@ -50,5 +50,12 @@ export function useAuth() {
     await requireSupabase().auth.signOut();
   }, []);
 
-  return { user, profile, loading, signInWithEmail, signOut };
+  // Lets a caller that just updated the profile row (e.g. saving a
+  // display name in Settings) sync the change locally without a full
+  // reload — updateMyProfile() returns the updated row, pass it here.
+  const setProfileLocally = useCallback((updated) => {
+    setProfile(updated);
+  }, []);
+
+  return { user, profile, loading, signInWithEmail, signOut, setProfileLocally };
 }

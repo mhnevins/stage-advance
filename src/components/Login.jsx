@@ -51,6 +51,9 @@ export default function Login({ onSignIn }) {
             >
               {busy ? "Sending…" : "Send me a login link"}
             </button>
+            <div style={{ marginTop: 12 }}>
+              <a href="/privacy" className="sa-sub" style={{ fontSize: 12 }}>Privacy Notice</a>
+            </div>
           </form>
         )}
       </div>

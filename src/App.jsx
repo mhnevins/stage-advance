@@ -4,9 +4,11 @@ import { storage } from "./lib/storage";
 import { useAuth } from "./lib/useAuth";
 import { listMyInventory, addInventoryItem, updateInventoryItem, removeInventoryItem } from "./lib/inventory";
 import { lookupMicLibrary, cacheMicLibraryEntry, fetchAiTagsForMic } from "./lib/micLibrary";
-import { resolveOwnerBySlug } from "./lib/profile";
+import { resolveOwnerBySlug, updateMyProfile } from "./lib/profile";
+import { exportMyData, deleteMyAccount } from "./lib/account";
 import * as submissionsApi from "./lib/submissions";
 import Login from "./components/Login";
+import PrivacyNotice from "./components/PrivacyNotice";
 
 /* ————————————————————————————————————————————————
    STAGE ADVANCE v3 — input list & gear planner for live sound
@@ -325,16 +327,18 @@ const submissionToShow = (sub) => {
 
 const FORM_SLUG_RE = /^\/form\/([a-zA-Z0-9-]+)\/?$/;
 const LEGACY_FORM_RE = /^\/band-form\/?$/;
+const PRIVACY_RE = /^\/privacy\/?$/;
 
 export default function StageAdvance() {
-  const { user, profile, loading: authLoading, signInWithEmail, signOut } = useAuth();
+  const { user, profile, loading: authLoading, signInWithEmail, signOut, setProfileLocally } = useAuth();
 
   const formMatch = window.location.pathname.match(FORM_SLUG_RE);
   const formSlug = formMatch ? formMatch[1] : null;
   const legacyForm = LEGACY_FORM_RE.test(window.location.pathname);
+  const isPrivacyRoute = PRIVACY_RE.test(window.location.pathname);
   const standalone = Boolean(formSlug) || legacyForm;
 
-  const [mode, setMode] = useState(standalone ? "form" : "plan"); // 'plan' | 'form' | 'locker'
+  const [mode, setMode] = useState(standalone ? "form" : "plan"); // 'plan' | 'form' | 'locker' | 'settings'
   const [shows, setShows] = useState([]);
   const [inventoryItems, setInventoryItems] = useState([]);
   const [inventoryErr, setInventoryErr] = useState("");
@@ -354,6 +358,14 @@ export default function StageAdvance() {
   const [pasteText, setPasteText] = useState("");
   const [importBusy, setImportBusy] = useState(false);
   const [importReview, setImportReview] = useState(null); // { items: [{label, qty, type, needs_phantom, use_cases, status, selected}] }
+  const [settingsNameDraft, setSettingsNameDraft] = useState("");
+  const [settingsSaved, setSettingsSaved] = useState(false);
+  const [settingsErr, setSettingsErr] = useState("");
+  const [exportBusy, setExportBusy] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteErr, setDeleteErr] = useState("");
+  const [accountDeleted, setAccountDeleted] = useState(false);
   const [dragIdx, setDragIdx] = useState(null);
   const [overIdx, setOverIdx] = useState(null);
   const [submissions, setSubmissions] = useState([]);
@@ -464,6 +476,43 @@ export default function StageAdvance() {
   };
 
   useEffect(() => { loadSubmissions(); }, [user]);
+
+  useEffect(() => { setSettingsNameDraft(profile?.display_name || ""); }, [profile]);
+
+  const saveDisplayName = async () => {
+    setSettingsErr("");
+    setSettingsSaved(false);
+    try {
+      const updated = await updateMyProfile({ display_name: settingsNameDraft.trim() || null });
+      setProfileLocally(updated);
+      setSettingsSaved(true);
+      setTimeout(() => setSettingsSaved(false), 1600);
+    } catch (e) {
+      setSettingsErr("Couldn't save — please try again.");
+    }
+  };
+
+  const handleExportData = async () => {
+    setExportBusy(true);
+    setSettingsErr("");
+    try { await exportMyData(); }
+    catch (e) { setSettingsErr("Couldn't export your data — please try again."); }
+    finally { setExportBusy(false); }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (deleteConfirmText !== "DELETE") return;
+    setDeleteBusy(true);
+    setDeleteErr("");
+    try {
+      await deleteMyAccount();
+      setAccountDeleted(true);
+      await signOut();
+    } catch (e) {
+      setDeleteErr(e.message || "Couldn't delete your account — please try again.");
+      setDeleteBusy(false);
+    }
+  };
 
   const submitForm = async () => {
     if (!form.band.trim()) { setFormErr("Band name is required."); return; }
@@ -934,8 +983,9 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
           </div>
 
           <div className="sa-privacy">
-            Your info goes only to your sound engineer for planning this show — please don't include
-            sensitive personal info beyond your show contact details.
+            Your info goes only to {effectiveFormOwner?.display_name || "your sound engineer"} for
+            planning this show — please don't include sensitive personal info beyond your show
+            contact details. See our <a href="/privacy" style={{ color: "inherit" }}>Privacy Notice</a>.
           </div>
 
           {formErr && <div className="sa-shortbanner">{formErr}</div>}
@@ -1369,6 +1419,59 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
     </div>
   );
 
+  const renderSettings = () => (
+    <div className="sa-grid" style={{ maxWidth: 560, margin: "0 auto" }}>
+      <div className="sa-card">
+        <h2 className="sa-h2">Account settings</h2>
+
+        <div style={{ marginTop: 10 }}>
+          <label className="sa-label">Display name</label>
+          <div className="sa-sub" style={{ marginBottom: 8 }}>
+            Shown to bands on your Band Form link instead of your email. Leave blank to just show your email.
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input className="sa-input" style={{ flex: 1 }} value={settingsNameDraft}
+              placeholder={user?.email}
+              onChange={(e) => setSettingsNameDraft(e.target.value)} />
+            <button className="sa-btn primary" onClick={saveDisplayName}>
+              {settingsSaved ? "Saved ✓" : "Save"}
+            </button>
+          </div>
+          {settingsErr && <div className="sa-shortbanner" style={{ marginTop: 10 }}>{settingsErr}</div>}
+        </div>
+      </div>
+
+      <div className="sa-card">
+        <h2 className="sa-h2">Your data</h2>
+        <div className="sa-sub" style={{ marginBottom: 12 }}>
+          Everything below covers your own shows, locker, and questionnaire inbox — see our{" "}
+          <a href="/privacy" style={{ color: "inherit" }}>Privacy Notice</a> for details on what's collected and why.
+        </div>
+        <button className="sa-btn" onClick={handleExportData} disabled={exportBusy}>
+          {exportBusy ? "Preparing…" : "Export my data"}
+        </button>
+      </div>
+
+      <div className="sa-card" style={{ borderColor: "#D64545" }}>
+        <h2 className="sa-h2" style={{ color: "#D64545" }}>Delete account</h2>
+        <div className="sa-sub" style={{ marginBottom: 12 }}>
+          Permanently deletes your login, shows, locker, and submissions inbox — immediately, with no
+          way to undo it. Type <b>DELETE</b> below to confirm.
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <input className="sa-input" style={{ maxWidth: 160 }} value={deleteConfirmText}
+            placeholder="DELETE"
+            onChange={(e) => setDeleteConfirmText(e.target.value)} />
+          <button className="sa-btn ghost danger" disabled={deleteConfirmText !== "DELETE" || deleteBusy}
+            onClick={handleDeleteAccount}>
+            {deleteBusy ? "Deleting…" : "Delete my account"}
+          </button>
+        </div>
+        {deleteErr && <div className="sa-shortbanner" style={{ marginTop: 10 }}>{deleteErr}</div>}
+      </div>
+    </div>
+  );
+
   const renderShow = () => (
     <div className="sa-grid" style={{ gap: 18 }}>
       <div className="no-print" style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
@@ -1693,18 +1796,21 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
             <div className="sa-logo">Stage<span>Advance</span></div>
             <div className="sa-sub">input lists · mic pulls · stand counts — before you load the van</div>
           </div>
-          {!standalone && user && (
+          {!isPrivacyRoute && !standalone && user && (
             <div className="sa-tabs no-print" style={{ alignItems: "center" }}>
               <div className="sa-sub" style={{ marginRight: 4 }}>Signed in as {user.email}</div>
               <button className={`sa-tab${mode === "plan" ? " on" : ""}`} onClick={() => setMode("plan")}>Planner</button>
               <button className={`sa-tab${mode === "locker" ? " on" : ""}`} onClick={() => setMode("locker")}>Locker</button>
               <button className={`sa-tab${mode === "form" ? " on" : ""}`} onClick={() => { setMode("form"); setFormDone(false); }}>Band Form</button>
+              <button className={`sa-tab${mode === "settings" ? " on" : ""}`} onClick={() => setMode("settings")}>Settings</button>
               <button className="sa-tab" onClick={signOut}>Sign out</button>
             </div>
           )}
         </div>
 
-        {legacyForm ? (
+        {isPrivacyRoute ? (
+          <PrivacyNotice />
+        ) : legacyForm ? (
           <div className="sa-card" style={{ maxWidth: 480, margin: "60px auto", textAlign: "center", padding: 32 }}>
             <h2 className="sa-h2">This link has moved</h2>
             <div className="sa-sub">Ask your sound engineer for their current Band Form link.</div>
@@ -1716,12 +1822,17 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
             <h2 className="sa-h2">This form link isn't valid</h2>
             <div className="sa-sub">Ask your sound engineer for their current Band Form link.</div>
           </div>
+        ) : !standalone && accountDeleted ? (
+          <div className="sa-card" style={{ maxWidth: 480, margin: "60px auto", textAlign: "center", padding: 32 }}>
+            <h2 className="sa-h2">Your account has been deleted</h2>
+            <div className="sa-sub">Your login, shows, locker, and inbox have all been permanently removed.</div>
+          </div>
         ) : !standalone && authLoading ? (
           <div className="sa-sub" style={{ textAlign: "center", margin: 60 }}>Loading…</div>
         ) : !standalone && !user ? (
           <Login onSignIn={signInWithEmail} />
         ) : (
-          mode === "form" ? renderForm() : mode === "locker" ? renderLocker() : active ? renderShow() : renderShowList()
+          mode === "form" ? renderForm() : mode === "locker" ? renderLocker() : mode === "settings" ? renderSettings() : active ? renderShow() : renderShowList()
         )}
       </div>
       {active && mode === "plan" && !standalone && user && renderPrintSheet()}
