@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import Papa from "papaparse";
 import { storage } from "./lib/storage";
 import { useAuth } from "./lib/useAuth";
 import { listMyInventory, addInventoryItem, updateInventoryItem, removeInventoryItem } from "./lib/inventory";
@@ -95,6 +96,64 @@ const chunkedMap = async (items, size, fn) => {
     results.push(...await Promise.all(chunk.map(fn)));
   }
   return results;
+};
+
+/* ——— Phase 4b: CSV/XLSX bulk import. Both formats get reduced to the
+   same plain rows: string[][] shape, then this shared, generous-not-
+   exhaustive column detection turns that into {label, qty} candidates
+   for the same recognition pipeline paste-import already uses. ——— */
+const IMPORT_LABEL_HEADERS = ["model", "mic", "microphone", "name", "item", "label", "gear"];
+const IMPORT_QTY_HEADERS = ["qty", "quantity", "count", "amount", "owned", "#"];
+
+const parseCsvFile = (file) => new Promise((resolve, reject) => {
+  Papa.parse(file, {
+    complete: (results) => resolve(results.data),
+    error: reject,
+    skipEmptyLines: true,
+  });
+});
+
+const parseXlsxFile = async (file) => {
+  const XLSX = await import("xlsx");
+  const buffer = await file.arrayBuffer();
+  const workbook = XLSX.read(buffer, { type: "array" });
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  return XLSX.utils.sheet_to_json(sheet, { header: 1 });
+};
+
+const extractCandidatesFromRows = (rows) => {
+  const clean = (rows || [])
+    .map((r) => (r || []).map((c) => (c === null || c === undefined ? "" : String(c).trim())))
+    .filter((r) => r.some((c) => c !== ""));
+  if (clean.length === 0) return [];
+
+  const first = clean[0].map((c) => c.toLowerCase());
+  let labelCol = first.findIndex((c) => IMPORT_LABEL_HEADERS.includes(c));
+  let qtyCol = first.findIndex((c) => IMPORT_QTY_HEADERS.includes(c));
+  let dataRows;
+
+  if (labelCol !== -1 || qtyCol !== -1) {
+    if (labelCol === -1) labelCol = 0;
+    dataRows = clean.slice(1);
+  } else {
+    const colCount = Math.max(...clean.map((r) => r.length));
+    qtyCol = -1;
+    for (let c = 0; c < colCount; c++) {
+      const numericCount = clean.filter((r) => /^\d+$/.test(r[c] || "")).length;
+      if (numericCount / clean.length > 0.6) { qtyCol = c; break; }
+    }
+    labelCol = qtyCol === 0 ? 1 : 0;
+    dataRows = clean;
+  }
+
+  return dataRows
+    .map((r) => {
+      const label = (r[labelCol] || "").trim();
+      if (!label) return null;
+      const qtyRaw = qtyCol >= 0 ? (r[qtyCol] || "").trim() : "";
+      return { label, qty: /^\d+$/.test(qtyRaw) ? parseInt(qtyRaw, 10) : 1 };
+    })
+    .filter(Boolean);
 };
 
 /* Defaults chosen from your inventory */
@@ -293,8 +352,8 @@ export default function StageAdvance() {
   const [rowLookupBusyId, setRowLookupBusyId] = useState(null);
   const [showPastePanel, setShowPastePanel] = useState(false);
   const [pasteText, setPasteText] = useState("");
-  const [pasteBusy, setPasteBusy] = useState(false);
-  const [pasteReview, setPasteReview] = useState(null); // { items: [{label, qty, type, needs_phantom, use_cases, status, selected}] }
+  const [importBusy, setImportBusy] = useState(false);
+  const [importReview, setImportReview] = useState(null); // { items: [{label, qty, type, needs_phantom, use_cases, status, selected}] }
   const [dragIdx, setDragIdx] = useState(null);
   const [overIdx, setOverIdx] = useState(null);
   const [submissions, setSubmissions] = useState([]);
@@ -305,6 +364,7 @@ export default function StageAdvance() {
   const [formOwner, setFormOwner] = useState(null);
   const [formOwnerStatus, setFormOwnerStatus] = useState(formSlug ? "loading" : "n/a");
   const saveTimer = useRef(null);
+  const fileInputRef = useRef(null);
 
   const inventory = {};
   inventoryItems.forEach((i) => { inventory[i.label] = i.qty; });
@@ -1024,12 +1084,36 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
   };
 
   /* ——— Phase 4a: bulk paste import ——— */
-  const startPasteImport = async () => {
+  const startPasteImport = () => {
     const lines = pasteText.split("\n").map(parseLockerPasteLine).filter(Boolean);
     if (lines.length === 0) return;
+    runImportRecognition(lines);
+  };
 
+  const handleFileImport = async (file) => {
+    setInventoryErr("");
+    try {
+      const isXlsx = /\.xlsx?$/i.test(file.name);
+      const rows = isXlsx ? await parseXlsxFile(file) : await parseCsvFile(file);
+      const candidates = extractCandidatesFromRows(rows);
+      if (candidates.length === 0) {
+        setInventoryErr("Couldn't find any mic/DI rows in that file — check it has a label and (optionally) a quantity column.");
+        return;
+      }
+      await runImportRecognition(candidates);
+    } catch (e) {
+      setInventoryErr("Couldn't read that file — please check the format and try again.");
+    }
+  };
+
+  /* Shared by every bulk-import source (paste, CSV, XLSX): given raw
+     {label, qty} candidates, dedupe, check the shared library, fall
+     back to a lookup for anything unrecognized, and build the review
+     list. Owns importBusy/inventoryErr/importReview for the whole
+     recognition step — callers just hand it candidates. */
+  const runImportRecognition = async (rawCandidates) => {
     const merged = new Map();
-    lines.forEach(({ label, qty }) => {
+    rawCandidates.forEach(({ label, qty }) => {
       const key = label.toLowerCase();
       const existing = merged.get(key);
       if (existing) existing.qty += qty;
@@ -1041,7 +1125,7 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
     const already = candidates.filter((c) => ownedLabels.has(c.label.toLowerCase()));
     const toLookup = candidates.filter((c) => !ownedLabels.has(c.label.toLowerCase()));
 
-    setPasteBusy(true);
+    setImportBusy(true);
     setInventoryErr("");
 
     const libraryResults = await chunkedMap(toLookup, 8, async (c) => {
@@ -1071,26 +1155,26 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
         : { label: c.label, qty: c.qty, type: "", needs_phantom: false, use_cases: [], status: "needs-input", selected: true }),
     ];
 
-    setPasteReview({ items });
-    setPasteBusy(false);
+    setImportReview({ items });
+    setImportBusy(false);
   };
 
-  const updatePasteReviewItem = (idx, patch) => {
-    setPasteReview((prev) => {
+  const updateImportReviewItem = (idx, patch) => {
+    setImportReview((prev) => {
       if (!prev) return prev;
       return { ...prev, items: prev.items.map((it, i) => (i === idx ? { ...it, ...patch } : it)) };
     });
   };
 
-  const confirmPasteImport = async () => {
-    if (!pasteReview) return;
-    for (const item of pasteReview.items.filter((i) => i.selected)) {
+  const confirmImport = async () => {
+    if (!importReview) return;
+    for (const item of importReview.items.filter((i) => i.selected)) {
       await addLockerItem(item.label, item.qty, { type: item.type || null, needs_phantom: item.needs_phantom, use_cases: item.use_cases });
       if (item.fromAi && item.type) {
         cacheMicLibraryEntry(item.label, { type: item.type, needsPhantom: item.needs_phantom, useCases: item.use_cases }).catch(() => {});
       }
     }
-    setPasteReview(null);
+    setImportReview(null);
     setPasteText("");
     setShowPastePanel(false);
   };
@@ -1199,19 +1283,19 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
         )}
 
         <div style={{ marginTop: 18, paddingTop: 14, borderTop: "1px solid #2c2f37" }}>
-          {pasteReview ? (
+          {importReview ? (
             <div className="sa-card" style={{ background: "#20242b" }}>
               <div style={{ fontWeight: 700, marginBottom: 4 }}>Review your pasted list</div>
               <div className="sa-sub" style={{ marginBottom: 10 }}>
-                {pasteReview.items.filter((i) => i.status === "recognized").length} of {pasteReview.items.length} recognized automatically
-                {pasteReview.items.some((i) => i.status === "duplicate") && `, ${pasteReview.items.filter((i) => i.status === "duplicate").length} already in your locker (unchecked)`}
-                {pasteReview.items.some((i) => i.status === "needs-input") && `, ${pasteReview.items.filter((i) => i.status === "needs-input").length} need your input`}.
+                {importReview.items.filter((i) => i.status === "recognized").length} of {importReview.items.length} recognized automatically
+                {importReview.items.some((i) => i.status === "duplicate") && `, ${importReview.items.filter((i) => i.status === "duplicate").length} already in your locker (unchecked)`}
+                {importReview.items.some((i) => i.status === "needs-input") && `, ${importReview.items.filter((i) => i.status === "needs-input").length} need your input`}.
               </div>
-              {pasteReview.items.map((item, idx) => (
+              {importReview.items.map((item, idx) => (
                 <div key={idx} style={{ padding: "8px 0", borderBottom: "1px dashed #2c2f37" }}>
                   <div className="sa-member" style={{ gridTemplateColumns: "auto 1fr 90px", alignItems: "center" }}>
                     <input type="checkbox" checked={item.selected}
-                      onChange={(e) => updatePasteReviewItem(idx, { selected: e.target.checked })} />
+                      onChange={(e) => updateImportReviewItem(idx, { selected: e.target.checked })} />
                     <div>
                       <b>{item.label}</b>
                       {item.status === "duplicate" && <span className="sa-sub"> — already in your locker</span>}
@@ -1223,16 +1307,16 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
                       )}
                     </div>
                     <input className="sa-input" type="number" min="0" value={item.qty}
-                      onChange={(e) => updatePasteReviewItem(idx, { qty: Math.max(0, Number(e.target.value) || 0) })} />
+                      onChange={(e) => updateImportReviewItem(idx, { qty: Math.max(0, Number(e.target.value) || 0) })} />
                   </div>
-                  {renderTagFields(item, (patch) => updatePasteReviewItem(idx, patch))}
+                  {renderTagFields(item, (patch) => updateImportReviewItem(idx, patch))}
                 </div>
               ))}
               <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                <button className="sa-btn primary" onClick={confirmPasteImport}>
-                  Import {pasteReview.items.filter((i) => i.selected).length} item{pasteReview.items.filter((i) => i.selected).length === 1 ? "" : "s"}
+                <button className="sa-btn primary" onClick={confirmImport}>
+                  Import {importReview.items.filter((i) => i.selected).length} item{importReview.items.filter((i) => i.selected).length === 1 ? "" : "s"}
                 </button>
-                <button className="sa-btn ghost" onClick={() => setPasteReview(null)}>Cancel</button>
+                <button className="sa-btn ghost" onClick={() => setImportReview(null)}>Cancel</button>
               </div>
             </div>
           ) : showPastePanel ? (
@@ -1244,14 +1328,25 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
                 placeholder={"SM57\n2x SM58\nBeta 52A (1)\n…"}
                 onChange={(e) => setPasteText(e.target.value)} />
               <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-                <button className="sa-btn primary" onClick={startPasteImport} disabled={pasteBusy || !pasteText.trim()}>
-                  {pasteBusy ? "Recognizing…" : "Parse & review"}
+                <button className="sa-btn primary" onClick={startPasteImport} disabled={importBusy || !pasteText.trim()}>
+                  {importBusy ? "Recognizing…" : "Parse & review"}
                 </button>
                 <button className="sa-btn ghost" onClick={() => { setShowPastePanel(false); setPasteText(""); }}>Cancel</button>
               </div>
             </div>
           ) : (
-            <button className="sa-btn ghost" onClick={() => setShowPastePanel(true)}>📋 Paste a list</button>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="sa-btn ghost" onClick={() => setShowPastePanel(true)}>📋 Paste a list</button>
+              <input ref={fileInputRef} type="file" accept=".csv,.xlsx,.xls" style={{ display: "none" }}
+                onChange={(e) => {
+                  const file = e.target.files[0];
+                  e.target.value = "";
+                  if (file) handleFileImport(file);
+                }} />
+              <button className="sa-btn ghost" disabled={importBusy} onClick={() => fileInputRef.current.click()}>
+                {importBusy ? "Recognizing…" : "📁 Upload a file"}
+              </button>
+            </div>
           )}
         </div>
       </div>
