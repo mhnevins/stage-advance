@@ -1171,7 +1171,7 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
         {lockerLookup ? (
           <div className="sa-card" style={{ marginTop: 14, background: "#20242b" }}>
             <div style={{ fontWeight: 700 }}>
-              {lockerLookup.fromAi ? "AI suggestion for" : lockerLookup.type ? "Recognized:" : "Not recognized —"} "{lockerLookup.label}"
+              {lockerLookup.fromAi ? "Best guess for" : lockerLookup.type ? "Recognized:" : "Not recognized —"} "{lockerLookup.label}"
             </div>
             <div className="sa-sub" style={{ marginBottom: 4 }}>
               {lockerLookup.type
@@ -1216,6 +1216,11 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
                       <b>{item.label}</b>
                       {item.status === "duplicate" && <span className="sa-sub"> — already in your locker</span>}
                       {item.status === "needs-input" && <span className="sa-sub"> — needs your input</span>}
+                      {item.status === "recognized" && item.fromAi && (
+                        <span style={{ color: "#E8B93E", fontSize: 11, fontWeight: 700, marginLeft: 6 }}>
+                          🔍 Best guess — please confirm
+                        </span>
+                      )}
                     </div>
                     <input className="sa-input" type="number" min="0" value={item.qty}
                       onChange={(e) => updatePasteReviewItem(idx, { qty: Math.max(0, Number(e.target.value) || 0) })} />
