@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { storage } from "./lib/storage";
 import { useAuth } from "./lib/useAuth";
 import { listMyInventory, addInventoryItem, updateInventoryItem, removeInventoryItem } from "./lib/inventory";
+import { lookupMicLibrary, cacheMicLibraryEntry, fetchAiTagsForMic } from "./lib/micLibrary";
 import { resolveOwnerBySlug } from "./lib/profile";
 import * as submissionsApi from "./lib/submissions";
 import Login from "./components/Login";
@@ -39,6 +40,16 @@ const needsPhantom = (mic) =>
   CONDENSERS.some((c) => mic === c) || mic === "DI (active)" || mic === "Pro48 (active DI)";
 
 const STAND_OPTIONS = ["Tall boom", "Short boom", "Straight", "Drum clamp", "Desk stand", "None"];
+
+/* ——— Mic/DI recognition (Phase 3): fixed vocabulary shared with
+   supabase/migrations/0002_mic_library.sql and netlify/functions/lookup-mic.js ——— */
+const MIC_TYPE_OPTIONS = ["dynamic", "condenser", "ribbon", "di-active", "di-passive"];
+const USE_CASE_OPTIONS = [
+  "kick", "snare", "toms", "hi-hat", "overhead", "percussion",
+  "bass-di", "bass-amp", "guitar-amp", "acoustic-guitar", "keys",
+  "strings", "horn", "lead-vocal", "backing-vocal", "playback",
+  "di-passive", "di-active",
+];
 
 /* Defaults chosen from your inventory */
 const CATALOG = [
@@ -231,6 +242,8 @@ export default function StageAdvance() {
   const [customGroup, setCustomGroup] = useState("Other");
   const [lockerLabelDraft, setLockerLabelDraft] = useState("");
   const [lockerQtyDraft, setLockerQtyDraft] = useState("1");
+  const [lockerLookup, setLockerLookup] = useState(null); // { label, qty, type, needs_phantom, use_cases, fromAi } while reviewing
+  const [lockerLookupBusy, setLockerLookupBusy] = useState(false);
   const [dragIdx, setDragIdx] = useState(null);
   const [overIdx, setOverIdx] = useState(null);
   const [submissions, setSubmissions] = useState([]);
@@ -247,13 +260,23 @@ export default function StageAdvance() {
   const MIC_OPTIONS = [...Object.keys(inventory), ...EXTRA_OPTIONS];
   const isRental = (mic) => mic !== "" && !MIC_OPTIONS.includes(mic);
 
+  /* Data-driven phantom check: prefer the engineer's own recognized/edited
+     tag for a mic they own, fall back to the static heuristic (needsPhantom,
+     module-level) for anything not in their locker — rentals, EXTRA_OPTIONS,
+     or mics suggested by the static Band Form import mapping. */
+  const resolvePhantom = (mic) => {
+    const item = inventoryItems.find((i) => i.label === mic);
+    if (item && item.needs_phantom !== null && item.needs_phantom !== undefined) return item.needs_phantom;
+    return needsPhantom(mic);
+  };
+
   const loadInventory = () => listMyInventory().then(setInventoryItems).catch(() => setInventoryItems([]));
 
-  const addLockerItem = async (label, qty) => {
+  const addLockerItem = async (label, qty, tags = {}) => {
     if (!label.trim()) return;
     setInventoryErr("");
     try {
-      const row = await addInventoryItem(label.trim(), qty);
+      const row = await addInventoryItem(label.trim(), qty, tags);
       setInventoryItems((prev) => [...prev, row].sort((a, b) => a.label.localeCompare(b.label)));
     } catch (e) {
       setInventoryErr(e.code === "23505"
@@ -368,7 +391,7 @@ export default function StageAdvance() {
     const ch = {
       id: uid(), group: item.group, name: item.label,
       mic: item.mic, stand: item.stand,
-      phantom: needsPhantom(item.mic), note: "",
+      phantom: resolvePhantom(item.mic), note: "",
     };
     updateShow({ channels: [...active.channels, ch] });
   };
@@ -602,6 +625,7 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
     .sa-btn.primary:hover { background:#f0c85f; }
     .sa-btn.ghost { background:transparent; border-color:transparent; color:#8a8f98; }
     .sa-btn.ghost:hover { color:#e7e6e2; background:#2c2f37; }
+    .sa-btn.ghost.on { background:#E8B93E; color:#1a1408; border-color:#E8B93E; }
     .sa-btn.danger:hover { border-color:#D64545; color:#ff8f8f; }
     .sa-btn:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline:2px solid #E8B93E; outline-offset:1px; }
     .sa-input { background:#17181c; border:1px solid #2c2f37; color:#e7e6e2; border-radius:6px; padding:7px 10px; font-size:14px; font-family:inherit; width:100%; box-sizing:border-box; }
@@ -890,22 +914,81 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
     </div>
   );
 
-  const submitLockerDraft = () => {
+  /* ——— add-a-mic lookup flow: label -> check shared library -> AI fallback -> editable review ——— */
+  const startLockerLookup = async () => {
     const label = lockerLabelDraft.trim();
     if (!label) return;
     const qty = Math.max(0, Number(lockerQtyDraft) || 0);
-    addLockerItem(label, qty);
+    setInventoryErr("");
+    setLockerLookupBusy(true);
+    const blank = { label, qty, type: "", needs_phantom: false, use_cases: [], fromAi: false };
+    try {
+      const known = await lookupMicLibrary(label);
+      if (known) {
+        setLockerLookup({ label, qty, type: known.type, needs_phantom: known.needs_phantom, use_cases: known.use_cases || [], fromAi: false });
+      } else {
+        try {
+          const ai = await fetchAiTagsForMic(label);
+          setLockerLookup({ label, qty, type: ai.type, needs_phantom: ai.needsPhantom, use_cases: ai.useCases || [], fromAi: true });
+        } catch (e) {
+          setLockerLookup(blank); // AI lookup failed — fall back to plain manual entry
+        }
+      }
+    } catch (e) {
+      setLockerLookup(blank);
+    } finally {
+      setLockerLookupBusy(false);
+    }
+  };
+
+  const confirmLockerLookup = async () => {
+    if (!lockerLookup) return;
+    const { label, qty, type, needs_phantom, use_cases, fromAi } = lockerLookup;
+    await addLockerItem(label, qty, { type: type || null, needs_phantom, use_cases });
+    if (fromAi && type) cacheMicLibraryEntry(label, { type, needsPhantom: needs_phantom, useCases: use_cases }).catch(() => {});
+    setLockerLookup(null);
     setLockerLabelDraft("");
     setLockerQtyDraft("1");
   };
 
+  /* small reusable tag editor — used both in the add-review panel and per existing row */
+  const renderTagFields = (tags, onChange) => (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginTop: 8 }}>
+      <select className="sa-input" style={{ maxWidth: 150 }} value={tags.type || ""}
+        onChange={(e) => onChange({ type: e.target.value })}>
+        <option value="">Type…</option>
+        {MIC_TYPE_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
+      </select>
+      <label className="sa-check" style={{ margin: 0 }}>
+        <input type="checkbox" checked={!!tags.needs_phantom}
+          onChange={(e) => onChange({ needs_phantom: e.target.checked })} />
+        Needs 48V
+      </label>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+        {USE_CASE_OPTIONS.map((uc) => (
+          <button key={uc} type="button"
+            className={`sa-btn ghost${(tags.use_cases || []).includes(uc) ? " on" : ""}`}
+            style={{ padding: "3px 8px", fontSize: 11 }}
+            onClick={() => onChange({
+              use_cases: (tags.use_cases || []).includes(uc)
+                ? tags.use_cases.filter((u) => u !== uc)
+                : [...(tags.use_cases || []), uc],
+            })}>
+            {uc}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
   const renderLocker = () => (
-    <div className="sa-grid" style={{ maxWidth: 640, margin: "0 auto" }}>
+    <div className="sa-grid" style={{ maxWidth: 720, margin: "0 auto" }}>
       <div className="sa-card">
         <h2 className="sa-h2">Your locker</h2>
         <div className="sa-sub" style={{ marginBottom: 14 }}>
           The mics and DIs you own. This drives the "Your locker" list when building input lists,
-          plus mic-pull and shortage warnings.
+          plus mic-pull, shortage warnings, and phantom-power detection. Recognized mics get
+          suggested tags — always editable, never locked in.
         </div>
 
         {inventoryItems.length === 0 ? (
@@ -914,32 +997,55 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
           </div>
         ) : (
           inventoryItems.map((i) => (
-            <div key={i.id} className="sa-member" style={{ gridTemplateColumns: "1fr 90px auto" }}>
-              <input className="sa-input" value={i.label}
-                onChange={(e) => setInventoryItems((prev) => prev.map((x) => (x.id === i.id ? { ...x, label: e.target.value } : x)))}
-                onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== i.label) updateLockerItem(i.id, { label: v }); }} />
-              <input className="sa-input" type="number" min="0" value={i.qty}
-                onChange={(e) => {
-                  const qty = Math.max(0, Number(e.target.value) || 0);
-                  setInventoryItems((prev) => prev.map((x) => (x.id === i.id ? { ...x, qty } : x)));
-                }}
-                onBlur={(e) => updateLockerItem(i.id, { qty: Math.max(0, Number(e.target.value) || 0) })} />
-              <button className="sa-btn ghost danger" title="Remove" onClick={() => removeLockerItem(i.id)}>✕</button>
+            <div key={i.id} style={{ padding: "10px 0", borderBottom: "1px dashed #2c2f37" }}>
+              <div className="sa-member" style={{ gridTemplateColumns: "1fr 90px auto" }}>
+                <input className="sa-input" value={i.label}
+                  onChange={(e) => setInventoryItems((prev) => prev.map((x) => (x.id === i.id ? { ...x, label: e.target.value } : x)))}
+                  onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== i.label) updateLockerItem(i.id, { label: v }); }} />
+                <input className="sa-input" type="number" min="0" value={i.qty}
+                  onChange={(e) => {
+                    const qty = Math.max(0, Number(e.target.value) || 0);
+                    setInventoryItems((prev) => prev.map((x) => (x.id === i.id ? { ...x, qty } : x)));
+                  }}
+                  onBlur={(e) => updateLockerItem(i.id, { qty: Math.max(0, Number(e.target.value) || 0) })} />
+                <button className="sa-btn ghost danger" title="Remove" onClick={() => removeLockerItem(i.id)}>✕</button>
+              </div>
+              {renderTagFields(i, (patch) => updateLockerItem(i.id, patch))}
             </div>
           ))
         )}
 
         {inventoryErr && <div className="sa-shortbanner" style={{ marginTop: 10 }}>{inventoryErr}</div>}
 
-        <div className="sa-member" style={{ gridTemplateColumns: "1fr 90px auto", marginTop: 14 }}>
-          <input className="sa-input" value={lockerLabelDraft} placeholder="e.g. SM57"
-            onChange={(e) => setLockerLabelDraft(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && submitLockerDraft()} />
-          <input className="sa-input" type="number" min="0" value={lockerQtyDraft}
-            onChange={(e) => setLockerQtyDraft(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && submitLockerDraft()} />
-          <button className="sa-btn primary" onClick={submitLockerDraft}>+ Add</button>
-        </div>
+        {lockerLookup ? (
+          <div className="sa-card" style={{ marginTop: 14, background: "#20242b" }}>
+            <div style={{ fontWeight: 700 }}>
+              {lockerLookup.fromAi ? "AI suggestion for" : lockerLookup.type ? "Recognized:" : "Not recognized —"} "{lockerLookup.label}"
+            </div>
+            <div className="sa-sub" style={{ marginBottom: 4 }}>
+              {lockerLookup.type
+                ? "Review and adjust before adding — nothing here is locked in."
+                : "Fill these in yourself — saved for next time."}
+            </div>
+            {renderTagFields(lockerLookup, (patch) => setLockerLookup((prev) => ({ ...prev, ...patch })))}
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+              <button className="sa-btn primary" onClick={confirmLockerLookup}>Confirm &amp; add</button>
+              <button className="sa-btn ghost" onClick={() => setLockerLookup(null)}>Cancel</button>
+            </div>
+          </div>
+        ) : (
+          <div className="sa-member" style={{ gridTemplateColumns: "1fr 90px auto", marginTop: 14 }}>
+            <input className="sa-input" value={lockerLabelDraft} placeholder="e.g. SM57"
+              onChange={(e) => setLockerLabelDraft(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && startLockerLookup()} />
+            <input className="sa-input" type="number" min="0" value={lockerQtyDraft}
+              onChange={(e) => setLockerQtyDraft(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && startLockerLookup()} />
+            <button className="sa-btn primary" onClick={startLockerLookup} disabled={lockerLookupBusy}>
+              {lockerLookupBusy ? "Looking up…" : "+ Add"}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1055,7 +1161,7 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
                     onChange={(e) => {
                       const v = e.target.value;
                       if (v === RENTAL) updateChannel(c.id, { mic: "" });
-                      else updateChannel(c.id, { mic: v, phantom: needsPhantom(v) ? true : c.phantom });
+                      else updateChannel(c.id, { mic: v, phantom: resolvePhantom(v) ? true : c.phantom });
                     }}>
                     <optgroup label="Your locker">
                       {Object.keys(inventory).map((m) => (

@@ -1,7 +1,9 @@
 /*
  * Each engineer's mic/DI locker, stored as real rows in
- * `inventory_items` (id, owner_id, label, qty). Scoped implicitly by
- * RLS (owner_id = auth.uid()) — no explicit filtering needed here.
+ * `inventory_items` (id, owner_id, label, qty, type, needs_phantom,
+ * use_cases — the last three from Phase 3's recognition system, always
+ * nullable/overridable). Scoped implicitly by RLS (owner_id =
+ * auth.uid()) — no explicit filtering needed here.
  */
 
 import { requireSupabase } from "./supabaseClient";
@@ -12,19 +14,19 @@ export async function listMyInventory() {
   if (!user) return [];
   const { data, error } = await supabase
     .from("inventory_items")
-    .select("id, label, qty")
+    .select("id, label, qty, type, needs_phantom, use_cases")
     .order("label", { ascending: true });
   if (error) throw error;
   return data || [];
 }
 
-export async function addInventoryItem(label, qty) {
+export async function addInventoryItem(label, qty, tags = {}) {
   const supabase = requireSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not signed in.");
   const { data, error } = await supabase
     .from("inventory_items")
-    .insert({ owner_id: user.id, label, qty })
+    .insert({ owner_id: user.id, label, qty, ...tags })
     .select()
     .single();
   if (error) throw error;
