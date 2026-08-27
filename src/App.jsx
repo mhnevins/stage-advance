@@ -820,6 +820,7 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
     .sa-ch:nth-child(odd of .sa-ch) { background:#1c1e23; }
     .sa-ch.drag-over { border-top:2px solid #E8B93E; }
     .sa-ch.dragging { opacity:.35; }
+    .sa-ch.short-row { box-shadow: inset 0 0 0 1px #D64545; background:#2a1a1a; border-radius:6px; }
     .sa-handle { color:#5a5f6a; cursor:grab; user-select:none; font-size:14px; line-height:1; text-align:center; padding:6px 2px; touch-action:none; }
     .sa-handle:hover { color:#e7e6e2; }
     .sa-handle:active { cursor:grabbing; }
@@ -1581,7 +1582,8 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
             </div>
             {active.channels.map((c, i) => (
               <div key={c.id}
-                className={`sa-ch${overIdx === i && dragIdx !== null ? " drag-over" : ""}${dragIdx === i ? " dragging" : ""}`}
+                className={`sa-ch${overIdx === i && dragIdx !== null ? " drag-over" : ""}${dragIdx === i ? " dragging" : ""}${shortages.some(([k]) => k === c.mic) ? " short-row" : ""}`}
+                title={shortages.some(([k]) => k === c.mic) ? "Over inventory — swap the mic or tag it as a rental" : undefined}
                 onDragOver={(e) => { e.preventDefault(); if (overIdx !== i) setOverIdx(i); }}
                 onDrop={(e) => { e.preventDefault(); dropChannel(dragIdx, i); setDragIdx(null); setOverIdx(null); }}>
                 <div className="sa-handle no-print" title="Drag to reorder" draggable
