@@ -13,9 +13,9 @@ import Anthropic from "@anthropic-ai/sdk";
 
 const USE_CASES = [
   "kick", "snare", "toms", "hi-hat", "overhead", "percussion",
-  "bass-di", "bass-amp", "guitar-amp", "acoustic-guitar", "keys",
-  "strings", "horn", "lead-vocal", "backing-vocal", "playback",
-  "di-passive", "di-active",
+  "bass-di", "bass-amp", "guitar-amp", "acoustic-guitar", "keys", "piano",
+  "organ", "strings", "horn", "lead-vocal", "backing-vocal", "wireless",
+  "playback", "di-passive", "di-active",
 ];
 
 const client = new Anthropic();

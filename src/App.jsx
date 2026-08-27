@@ -49,9 +49,9 @@ const STAND_OPTIONS = ["Tall boom", "Short boom", "Straight", "Drum clamp", "Des
 const MIC_TYPE_OPTIONS = ["dynamic", "condenser", "ribbon", "di-active", "di-passive"];
 const USE_CASE_OPTIONS = [
   "kick", "snare", "toms", "hi-hat", "overhead", "percussion",
-  "bass-di", "bass-amp", "guitar-amp", "acoustic-guitar", "keys",
-  "strings", "horn", "lead-vocal", "backing-vocal", "playback",
-  "di-passive", "di-active",
+  "bass-di", "bass-amp", "guitar-amp", "acoustic-guitar", "keys", "piano",
+  "organ", "strings", "horn", "lead-vocal", "backing-vocal", "wireless",
+  "playback", "di-passive", "di-active",
 ];
 
 /* ——— Phase 4a: parse one line of a pasted mic list into {label, qty}.
@@ -183,8 +183,8 @@ const CATALOG = [
   { group: "Guitars", label: "Gtr Modeler L/R", mic: "Stereo DI", stand: "None", di: true, useCases: ["di-active", "di-passive"] },
   { group: "Keys", label: "Keys L/R", mic: "Stereo DI", stand: "None", di: true, useCases: ["keys"] },
   { group: "Keys", label: "Keys 2 (mono)", mic: "SB-2 (passive DI)", stand: "None", di: true, useCases: ["keys"] },
-  { group: "Keys", label: "Organ/Leslie", mic: "e906", stand: "Short boom", useCases: ["guitar-amp"] },
-  { group: "Keys", label: "Acoustic Piano", mic: "Roswell MiniK47", stand: "Tall boom", useCases: ["keys"] },
+  { group: "Keys", label: "Organ/Leslie", mic: "e906", stand: "Short boom", useCases: ["organ"] },
+  { group: "Keys", label: "Acoustic Piano", mic: "Roswell MiniK47", stand: "Tall boom", useCases: ["piano", "overhead"] },
   { group: "Strings/Horns", label: "Fiddle/Violin", mic: "Pro48 (active DI)", stand: "None", di: true, useCases: ["strings", "di-active"] },
   { group: "Strings/Horns", label: "Cello/Upright", mic: "Roswell MiniK47", stand: "Short boom", useCases: ["strings"] },
   { group: "Strings/Horns", label: "Sax", mic: "MD421 Kompakt", stand: "Tall boom", useCases: ["horn"] },
@@ -193,7 +193,7 @@ const CATALOG = [
   { group: "Vocals", label: "Lead Vox", mic: "e945", stand: "Tall boom", useCases: ["lead-vocal"] },
   { group: "Vocals", label: "Lead Vox 2", mic: "e845", stand: "Tall boom", useCases: ["lead-vocal"] },
   { group: "Vocals", label: "BG Vox", mic: "SM58", stand: "Tall boom", useCases: ["backing-vocal"] },
-  { group: "Vocals", label: "Wireless Vox", mic: "Wireless HH", stand: "Tall boom", useCases: ["lead-vocal"] },
+  { group: "Vocals", label: "Wireless Vox", mic: "Wireless HH", stand: "Tall boom", useCases: ["wireless"] },
   { group: "Vocals", label: "Announce/MC", mic: "SM58", stand: "Straight", useCases: ["lead-vocal"] },
   { group: "Playback", label: "Tracks L/R", mic: "Stereo DI", stand: "None", di: true, useCases: ["playback"] },
   { group: "Playback", label: "Click (to mons)", mic: "SB-2 (passive DI)", stand: "None", di: true, useCases: ["playback", "di-passive"] },
