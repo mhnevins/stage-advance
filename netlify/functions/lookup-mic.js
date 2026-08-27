@@ -72,6 +72,11 @@ export default async (req) => {
       useCases: toolUse.input.use_cases,
     }), { status: 200, headers: { "Content-Type": "application/json" } });
   } catch (err) {
-    return new Response(JSON.stringify({ error: "Lookup failed" }), { status: 502 });
+    return new Response(JSON.stringify({
+      error: "Lookup failed",
+      detail: err?.message || String(err),
+      name: err?.name,
+      status: err?.status,
+    }), { status: 502, headers: { "Content-Type": "application/json" } });
   }
 };
