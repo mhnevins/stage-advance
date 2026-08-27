@@ -1285,7 +1285,7 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
         <div style={{ marginTop: 18, paddingTop: 14, borderTop: "1px solid #2c2f37" }}>
           {importReview ? (
             <div className="sa-card" style={{ background: "#20242b" }}>
-              <div style={{ fontWeight: 700, marginBottom: 4 }}>Review your pasted list</div>
+              <div style={{ fontWeight: 700, marginBottom: 4 }}>Review before importing</div>
               <div className="sa-sub" style={{ marginBottom: 10 }}>
                 {importReview.items.filter((i) => i.status === "recognized").length} of {importReview.items.length} recognized automatically
                 {importReview.items.some((i) => i.status === "duplicate") && `, ${importReview.items.filter((i) => i.status === "duplicate").length} already in your locker (unchecked)`}
@@ -1335,17 +1335,32 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
               </div>
             </div>
           ) : (
-            <div style={{ display: "flex", gap: 8 }}>
-              <button className="sa-btn ghost" onClick={() => setShowPastePanel(true)}>📋 Paste a list</button>
-              <input ref={fileInputRef} type="file" accept=".csv,.xlsx,.xls" style={{ display: "none" }}
-                onChange={(e) => {
-                  const file = e.target.files[0];
-                  e.target.value = "";
-                  if (file) handleFileImport(file);
-                }} />
-              <button className="sa-btn ghost" disabled={importBusy} onClick={() => fileInputRef.current.click()}>
-                {importBusy ? "Recognizing…" : "📁 Upload a file"}
-              </button>
+            <div>
+              <div className="sa-sub" style={{ marginBottom: 10 }}>
+                Already have a mic list somewhere? Import it instead of adding items one by one.
+              </div>
+              <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
+                <div>
+                  <button className="sa-btn ghost" onClick={() => setShowPastePanel(true)}>📋 Paste a list</button>
+                  <div className="sa-sub" style={{ fontSize: 11, marginTop: 4, maxWidth: 190 }}>
+                    Paste your mic inventory as plain text
+                  </div>
+                </div>
+                <div>
+                  <input ref={fileInputRef} type="file" accept=".csv,.xlsx,.xls" style={{ display: "none" }}
+                    onChange={(e) => {
+                      const file = e.target.files[0];
+                      e.target.value = "";
+                      if (file) handleFileImport(file);
+                    }} />
+                  <button className="sa-btn ghost" disabled={importBusy} onClick={() => fileInputRef.current.click()}>
+                    {importBusy ? "Recognizing…" : "📁 Upload a file"}
+                  </button>
+                  <div className="sa-sub" style={{ fontSize: 11, marginTop: 4, maxWidth: 190 }}>
+                    CSV or Excel (.csv, .xlsx) — one mic per row
+                  </div>
+                </div>
+              </div>
             </div>
           )}
         </div>
