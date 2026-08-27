@@ -244,6 +244,7 @@ export default function StageAdvance() {
   const [lockerQtyDraft, setLockerQtyDraft] = useState("1");
   const [lockerLookup, setLockerLookup] = useState(null); // { label, qty, type, needs_phantom, use_cases, fromAi } while reviewing
   const [lockerLookupBusy, setLockerLookupBusy] = useState(false);
+  const [rowLookupBusyId, setRowLookupBusyId] = useState(null);
   const [dragIdx, setDragIdx] = useState(null);
   const [overIdx, setOverIdx] = useState(null);
   const [submissions, setSubmissions] = useState([]);
@@ -951,6 +952,27 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
     setLockerQtyDraft("1");
   };
 
+  /* look up tags for an existing, already-saved locker row (e.g. items
+     added before Phase 3, or anything else that ended up untagged) */
+  const lookupExistingItem = async (item) => {
+    setInventoryErr("");
+    setRowLookupBusyId(item.id);
+    try {
+      const known = await lookupMicLibrary(item.label);
+      if (known) {
+        await updateLockerItem(item.id, { type: known.type, needs_phantom: known.needs_phantom, use_cases: known.use_cases || [] });
+      } else {
+        const ai = await fetchAiTagsForMic(item.label);
+        await updateLockerItem(item.id, { type: ai.type, needs_phantom: ai.needsPhantom, use_cases: ai.useCases || [] });
+        cacheMicLibraryEntry(item.label, { type: ai.type, needsPhantom: ai.needsPhantom, useCases: ai.useCases }).catch(() => {});
+      }
+    } catch (e) {
+      setInventoryErr(`Couldn't look up "${item.label}" — you can still fill in the tags yourself below.`);
+    } finally {
+      setRowLookupBusyId(null);
+    }
+  };
+
   /* small reusable tag editor — used both in the add-review panel and per existing row */
   const renderTagFields = (tags, onChange) => (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginTop: 8 }}>
@@ -1010,6 +1032,13 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
                   onBlur={(e) => updateLockerItem(i.id, { qty: Math.max(0, Number(e.target.value) || 0) })} />
                 <button className="sa-btn ghost danger" title="Remove" onClick={() => removeLockerItem(i.id)}>✕</button>
               </div>
+              {!i.type && (
+                <button className="sa-btn ghost" style={{ fontSize: 12, marginTop: 6 }}
+                  disabled={rowLookupBusyId === i.id}
+                  onClick={() => lookupExistingItem(i)}>
+                  {rowLookupBusyId === i.id ? "Looking up…" : "🔍 Look up tags"}
+                </button>
+              )}
               {renderTagFields(i, (patch) => updateLockerItem(i.id, patch))}
             </div>
           ))
