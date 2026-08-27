@@ -47,7 +47,7 @@ export default async (req) => {
           properties: {
             type: { type: "string", enum: ["dynamic", "condenser", "ribbon", "di-active", "di-passive"] },
             needs_phantom: { type: "boolean" },
-            use_cases: { type: "array", items: { type: "string", enum: USE_CASES }, maxItems: 4 },
+            use_cases: { type: "array", items: { type: "string", enum: USE_CASES } },
           },
           required: ["type", "needs_phantom", "use_cases"],
           additionalProperties: false,
@@ -69,7 +69,7 @@ export default async (req) => {
     return new Response(JSON.stringify({
       type: toolUse.input.type,
       needsPhantom: toolUse.input.needs_phantom,
-      useCases: toolUse.input.use_cases,
+      useCases: (toolUse.input.use_cases || []).slice(0, 4),
     }), { status: 200, headers: { "Content-Type": "application/json" } });
   } catch (err) {
     return new Response(JSON.stringify({
