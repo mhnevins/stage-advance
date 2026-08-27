@@ -159,41 +159,45 @@ const extractCandidatesFromRows = (rows) => {
 };
 
 /* Defaults chosen from your inventory */
+/* `useCases`: checked against each locker item's own tags (Phase 3
+   recognition) before falling back to the hardcoded `mic` suggestion
+   below — see pickMicForCatalogItem(). Keeps presets useful for any
+   locker's own naming, not just the mic names written here. */
 const CATALOG = [
-  { group: "Drums", label: "Kick In", mic: "Beta 52A", stand: "Short boom" },
-  { group: "Drums", label: "Kick Out", mic: "Beta 52A", stand: "Short boom" },
-  { group: "Drums", label: "Snare Top", mic: "SM57", stand: "Drum clamp" },
-  { group: "Drums", label: "Snare Bottom", mic: "e604 (clip)", stand: "None" },
-  { group: "Drums", label: "Hi-Hat", mic: "e614 (SDC)", stand: "Short boom" },
-  { group: "Drums", label: "Rack Tom", mic: "e604 (clip)", stand: "None" },
-  { group: "Drums", label: "Floor Tom", mic: "e604 (clip)", stand: "None" },
-  { group: "Drums", label: "OHSL", mic: "sE7 (SDC)", stand: "Tall boom" },
-  { group: "Drums", label: "OHSR", mic: "sE7 (SDC)", stand: "Tall boom" },
-  { group: "Perc", label: "Cajon", mic: "Audix D6", stand: "Short boom" },
-  { group: "Perc", label: "Congas", mic: "SM57", stand: "Short boom" },
-  { group: "Perc", label: "Perc Overhead", mic: "Roswell MiniK47", stand: "Tall boom" },
-  { group: "Bass", label: "Bass DI", mic: "Pro48 (active DI)", stand: "None", di: true },
-  { group: "Bass", label: "Bass Cab", mic: "Telefunken M82", stand: "Short boom" },
-  { group: "Guitars", label: "Electric Gtr Amp", mic: "e906", stand: "Short boom" },
-  { group: "Guitars", label: "Acoustic Gtr", mic: "SB-2 (passive DI)", stand: "None", di: true },
-  { group: "Guitars", label: "Gtr Modeler L/R", mic: "Stereo DI", stand: "None", di: true },
-  { group: "Keys", label: "Keys L/R", mic: "Stereo DI", stand: "None", di: true },
-  { group: "Keys", label: "Keys 2 (mono)", mic: "SB-2 (passive DI)", stand: "None", di: true },
-  { group: "Keys", label: "Organ/Leslie", mic: "e906", stand: "Short boom" },
-  { group: "Keys", label: "Acoustic Piano", mic: "Roswell MiniK47", stand: "Tall boom" },
-  { group: "Strings/Horns", label: "Fiddle/Violin", mic: "Pro48 (active DI)", stand: "None", di: true },
-  { group: "Strings/Horns", label: "Cello/Upright", mic: "Roswell MiniK47", stand: "Short boom" },
-  { group: "Strings/Horns", label: "Sax", mic: "MD421 Kompakt", stand: "Tall boom" },
-  { group: "Strings/Horns", label: "Trumpet", mic: "MD421 Kompakt", stand: "Tall boom" },
-  { group: "Strings/Horns", label: "Trombone", mic: "MD421 Kompakt", stand: "Tall boom" },
-  { group: "Vocals", label: "Lead Vox", mic: "e945", stand: "Tall boom" },
-  { group: "Vocals", label: "Lead Vox 2", mic: "e845", stand: "Tall boom" },
-  { group: "Vocals", label: "BG Vox", mic: "SM58", stand: "Tall boom" },
-  { group: "Vocals", label: "Wireless Vox", mic: "Wireless HH", stand: "Tall boom" },
-  { group: "Vocals", label: "Announce/MC", mic: "SM58", stand: "Straight" },
-  { group: "Playback", label: "Tracks L/R", mic: "Stereo DI", stand: "None", di: true },
-  { group: "Playback", label: "Click (to mons)", mic: "SB-2 (passive DI)", stand: "None", di: true },
-  { group: "Playback", label: "Talkback", mic: "SM58", stand: "Desk stand" },
+  { group: "Drums", label: "Kick In", mic: "Beta 52A", stand: "Short boom", useCases: ["kick"] },
+  { group: "Drums", label: "Kick Out", mic: "Beta 52A", stand: "Short boom", useCases: ["kick"] },
+  { group: "Drums", label: "Snare Top", mic: "SM57", stand: "Drum clamp", useCases: ["snare"] },
+  { group: "Drums", label: "Snare Bottom", mic: "e604 (clip)", stand: "None", useCases: ["snare"] },
+  { group: "Drums", label: "Hi-Hat", mic: "e614 (SDC)", stand: "Short boom", useCases: ["hi-hat"] },
+  { group: "Drums", label: "Rack Tom", mic: "e604 (clip)", stand: "None", useCases: ["toms"] },
+  { group: "Drums", label: "Floor Tom", mic: "e604 (clip)", stand: "None", useCases: ["toms"] },
+  { group: "Drums", label: "OHSL", mic: "sE7 (SDC)", stand: "Tall boom", useCases: ["overhead"] },
+  { group: "Drums", label: "OHSR", mic: "sE7 (SDC)", stand: "Tall boom", useCases: ["overhead"] },
+  { group: "Perc", label: "Cajon", mic: "Audix D6", stand: "Short boom", useCases: ["percussion"] },
+  { group: "Perc", label: "Congas", mic: "SM57", stand: "Short boom", useCases: ["percussion"] },
+  { group: "Perc", label: "Perc Overhead", mic: "Roswell MiniK47", stand: "Tall boom", useCases: ["percussion", "overhead"] },
+  { group: "Bass", label: "Bass DI", mic: "Pro48 (active DI)", stand: "None", di: true, useCases: ["bass-di"] },
+  { group: "Bass", label: "Bass Cab", mic: "Telefunken M82", stand: "Short boom", useCases: ["bass-amp"] },
+  { group: "Guitars", label: "Electric Gtr Amp", mic: "e906", stand: "Short boom", useCases: ["guitar-amp"] },
+  { group: "Guitars", label: "Acoustic Gtr", mic: "SB-2 (passive DI)", stand: "None", di: true, useCases: ["acoustic-guitar", "di-passive"] },
+  { group: "Guitars", label: "Gtr Modeler L/R", mic: "Stereo DI", stand: "None", di: true, useCases: ["di-active", "di-passive"] },
+  { group: "Keys", label: "Keys L/R", mic: "Stereo DI", stand: "None", di: true, useCases: ["keys"] },
+  { group: "Keys", label: "Keys 2 (mono)", mic: "SB-2 (passive DI)", stand: "None", di: true, useCases: ["keys"] },
+  { group: "Keys", label: "Organ/Leslie", mic: "e906", stand: "Short boom", useCases: ["guitar-amp"] },
+  { group: "Keys", label: "Acoustic Piano", mic: "Roswell MiniK47", stand: "Tall boom", useCases: ["keys"] },
+  { group: "Strings/Horns", label: "Fiddle/Violin", mic: "Pro48 (active DI)", stand: "None", di: true, useCases: ["strings", "di-active"] },
+  { group: "Strings/Horns", label: "Cello/Upright", mic: "Roswell MiniK47", stand: "Short boom", useCases: ["strings"] },
+  { group: "Strings/Horns", label: "Sax", mic: "MD421 Kompakt", stand: "Tall boom", useCases: ["horn"] },
+  { group: "Strings/Horns", label: "Trumpet", mic: "MD421 Kompakt", stand: "Tall boom", useCases: ["horn"] },
+  { group: "Strings/Horns", label: "Trombone", mic: "MD421 Kompakt", stand: "Tall boom", useCases: ["horn"] },
+  { group: "Vocals", label: "Lead Vox", mic: "e945", stand: "Tall boom", useCases: ["lead-vocal"] },
+  { group: "Vocals", label: "Lead Vox 2", mic: "e845", stand: "Tall boom", useCases: ["lead-vocal"] },
+  { group: "Vocals", label: "BG Vox", mic: "SM58", stand: "Tall boom", useCases: ["backing-vocal"] },
+  { group: "Vocals", label: "Wireless Vox", mic: "Wireless HH", stand: "Tall boom", useCases: ["lead-vocal"] },
+  { group: "Vocals", label: "Announce/MC", mic: "SM58", stand: "Straight", useCases: ["lead-vocal"] },
+  { group: "Playback", label: "Tracks L/R", mic: "Stereo DI", stand: "None", di: true, useCases: ["playback"] },
+  { group: "Playback", label: "Click (to mons)", mic: "SB-2 (passive DI)", stand: "None", di: true, useCases: ["playback", "di-passive"] },
+  { group: "Playback", label: "Talkback", mic: "SM58", stand: "Desk stand", useCases: ["lead-vocal"] },
 ];
 
 /* ——— Questionnaire ——— */
@@ -547,11 +551,25 @@ export default function StageAdvance() {
   const updateShow = (patch) =>
     setShows((prev) => prev.map((s) => (s.id === activeId ? { ...s, ...patch, updated: Date.now() } : s)));
 
+  /* Prefer a locker item actually tagged for this role over the
+     hardcoded catalog suggestion — makes presets useful regardless of
+     how someone named their own gear, not just the original locker's
+     naming. Falls back to item.mic (today's behavior) if nothing in
+     the locker is tagged for any of item.useCases. */
+  const pickMicForCatalogItem = (item) => {
+    for (const uc of item.useCases || []) {
+      const match = inventoryItems.find((i) => (i.use_cases || []).includes(uc) && i.qty > 0);
+      if (match) return match.label;
+    }
+    return item.mic;
+  };
+
   const addChannel = (item) => {
+    const mic = pickMicForCatalogItem(item);
     const ch = {
       id: uid(), group: item.group, name: item.label,
-      mic: item.mic, stand: item.stand,
-      phantom: resolvePhantom(item.mic), note: "",
+      mic, stand: item.stand,
+      phantom: resolvePhantom(mic), note: "",
     };
     updateShow({ channels: [...active.channels, ch] });
   };
