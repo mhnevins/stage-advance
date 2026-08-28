@@ -111,6 +111,33 @@ const readableTextColor = (hex) => {
   return luminance > 0.55 ? "#1a1408" : "#e7e6e2";
 };
 
+/* Curated quick-pick swatches, shown alongside (not instead of) the
+   native color input — picking an exact repeatable shade by eye every
+   time (e.g. matching Lead Vox purple across many channels) is the
+   friction this solves; the native input stays for anything custom. */
+const COLOR_SWATCHES = [
+  "#E8B93E", "#E8973E", "#E07A3E", "#D64545", "#C9435F", "#9A6BC9",
+  "#6B6BC9", "#4E8FD1", "#4CC3C9", "#5FA85C", "#8FBF4C", "#8A8F98",
+];
+
+function ColorSwatchPicker({ value, onChange, onClose }) {
+  return (
+    <div onClick={(e) => e.stopPropagation()}>
+      <div className="sa-swatchgrid">
+        {COLOR_SWATCHES.map((hex) => (
+          <button key={hex} type="button" className="sa-swatch" style={{ background: hex }}
+            title={hex}
+            onClick={() => { onChange(hex); if (onClose) onClose(); }} />
+        ))}
+      </div>
+      <label className="sa-swatchmore">
+        <input type="color" value={value} onChange={(e) => onChange(e.target.value)} />
+        Custom…
+      </label>
+    </div>
+  );
+}
+
 /* ——— Phase 4b: CSV/XLSX bulk import. Both formats get reduced to the
    same plain rows: string[][] shape, then this shared, generous-not-
    exhaustive column detection turns that into {label, qty} candidates
@@ -384,6 +411,8 @@ export default function StageAdvance() {
   const [deleteErr, setDeleteErr] = useState("");
   const [accountDeleted, setAccountDeleted] = useState(false);
   const [dragIdx, setDragIdx] = useState(null);
+  const [openColorPickerId, setOpenColorPickerId] = useState(null);
+  const [openGroupPickerFor, setOpenGroupPickerFor] = useState(null);
   const [overIdx, setOverIdx] = useState(null);
   const [submissions, setSubmissions] = useState([]);
   const [form, setForm] = useState(blankForm());
@@ -856,10 +885,14 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
     .sa-handle:hover { color:#e7e6e2; }
     .sa-handle:active { cursor:grabbing; }
     .sa-chnum { font-weight:800; font-size:15px; text-align:right; color:#8a8f98; }
-    .sa-strip { width:16px; height:30px; border-radius:2px; }
-    .sa-ch input.sa-strip { padding:0; border:none; cursor:pointer; background:none; -webkit-appearance:none; appearance:none; }
-    .sa-ch input.sa-strip::-webkit-color-swatch-wrapper { padding:0; }
-    .sa-ch input.sa-strip::-webkit-color-swatch { border:none; border-radius:2px; }
+    .sa-strip { width:16px; height:30px; border-radius:2px; padding:0; cursor:pointer; }
+    .sa-swatchgrid { display:grid; grid-template-columns: repeat(6, 20px); gap:6px; }
+    .sa-swatch { width:20px; height:20px; border-radius:4px; border:1px solid rgba(255,255,255,.15); cursor:pointer; padding:0; }
+    .sa-swatch:hover { transform:scale(1.12); }
+    .sa-swatchmore { display:flex; align-items:center; gap:6px; margin-top:8px; font-size:11px; color:#8a8f98; cursor:pointer; }
+    .sa-swatchmore input[type=color] { width:20px; height:20px; padding:0; border:none; background:none; cursor:pointer; }
+    .sa-swatch-overlay { position:fixed; inset:0; z-index:40; }
+    .sa-swatch-popover { position:absolute; top:100%; left:0; z-index:41; margin-top:4px; background:#20242b; border:1px solid #3a3e48; border-radius:8px; padding:10px; box-shadow:0 4px 16px rgba(0,0,0,.4); }
     .sa-ch input, .sa-ch select { background:#17181c; border:1px solid #2c2f37; color:#e7e6e2; border-radius:5px; padding:5px 7px; font-size:13px; width:100%; box-sizing:border-box; }
     .sa-micwrap { display:flex; flex-direction:column; gap:4px; min-width:0; }
     .sa-micwrap input { border-color:#9A6BC9; }
@@ -1502,13 +1535,19 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
           swatch to reset that one channel back to its group color).
         </div>
         {GROUP_ORDER.map((g) => (
-          <div key={g} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0" }}>
-            <input type="color" value={groupColor(g)}
-              style={{ width: 32, height: 28, padding: 0, border: "none", background: "none", cursor: "pointer" }}
-              onChange={(e) => saveGroupColor(g, e.target.value)} />
-            <div style={{ flex: 1 }}>{g}</div>
-            {groupColors[g] && (
-              <button className="sa-btn ghost" style={{ fontSize: 12 }} onClick={() => saveGroupColor(g, null)}>Reset</button>
+          <div key={g} style={{ padding: "6px 0", borderBottom: "1px dashed #2c2f37" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <button type="button" className="sa-strip" style={{ width: 28, height: 28, background: groupColor(g), border: "none" }}
+                onClick={() => setOpenGroupPickerFor(openGroupPickerFor === g ? null : g)} />
+              <div style={{ flex: 1 }}>{g}</div>
+              {groupColors[g] && (
+                <button className="sa-btn ghost" style={{ fontSize: 12 }} onClick={() => saveGroupColor(g, null)}>Reset</button>
+              )}
+            </div>
+            {openGroupPickerFor === g && (
+              <div style={{ marginTop: 8 }}>
+                <ColorSwatchPicker value={groupColor(g)} onChange={(hex) => saveGroupColor(g, hex)} />
+              </div>
             )}
           </div>
         ))}
@@ -1649,10 +1688,22 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
                   }}
                   onDragEnd={() => { setDragIdx(null); setOverIdx(null); }}>⠿</div>
                 <div className="sa-chnum">{i + 1}</div>
-                <input type="color" className="sa-strip" value={channelColor(c)}
-                  title={c.color ? "Channel color — right-click to reset to group default" : "Channel color — click to override just this row"}
-                  onChange={(e) => updateChannel(c.id, { color: e.target.value })}
-                  onContextMenu={(e) => { e.preventDefault(); updateChannel(c.id, { color: null }); }} />
+                <div style={{ position: "relative" }}>
+                  <button type="button" className="sa-strip" style={{ background: channelColor(c), border: "none" }}
+                    title={c.color ? "Channel color — click to change, right-click to reset to group default" : "Channel color — click to override just this row"}
+                    onClick={() => setOpenColorPickerId(openColorPickerId === c.id ? null : c.id)}
+                    onContextMenu={(e) => { e.preventDefault(); updateChannel(c.id, { color: null }); }} />
+                  {openColorPickerId === c.id && (
+                    <>
+                      <div className="sa-swatch-overlay" onClick={() => setOpenColorPickerId(null)} />
+                      <div className="sa-swatch-popover">
+                        <ColorSwatchPicker value={channelColor(c)}
+                          onChange={(hex) => updateChannel(c.id, { color: hex })}
+                          onClose={() => setOpenColorPickerId(null)} />
+                      </div>
+                    </>
+                  )}
+                </div>
                 <input value={c.name} onChange={(e) => updateChannel(c.id, { name: e.target.value })} />
                 <div className="sa-micwrap">
                   <select
