@@ -100,6 +100,17 @@ const chunkedMap = async (items, size, fn) => {
   return results;
 };
 
+/* Picks readable text (light or dark) for an arbitrary background hex
+   color, so custom group colors don't need a separately-chosen text
+   color too — one picker per group, not two. */
+const readableTextColor = (hex) => {
+  const c = (hex || "").replace("#", "");
+  if (c.length !== 6) return "#e7e6e2";
+  const r = parseInt(c.slice(0, 2), 16), g = parseInt(c.slice(2, 4), 16), b = parseInt(c.slice(4, 6), 16);
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.55 ? "#1a1408" : "#e7e6e2";
+};
+
 /* ——— Phase 4b: CSV/XLSX bulk import. Both formats get reduced to the
    same plain rows: string[][] shape, then this shared, generous-not-
    exhaustive column detection turns that into {label, qty} candidates
@@ -225,6 +236,7 @@ const blankForm = () => ({
 });
 
 const STORAGE_KEY = "stage-advance:shows";
+const GROUP_COLORS_KEY = "stage-advance:group-colors";
 const GROUP_ORDER = Object.keys(GROUPS);
 
 const groupSort = (channels) =>
@@ -344,6 +356,7 @@ export default function StageAdvance() {
 
   const [mode, setMode] = useState(standalone ? "form" : "plan"); // 'plan' | 'form' | 'locker' | 'settings'
   const [shows, setShows] = useState([]);
+  const [groupColors, setGroupColors] = useState({}); // { [group]: hexColor }, per-account override
   const [inventoryItems, setInventoryItems] = useState([]);
   const [inventoryErr, setInventoryErr] = useState("");
   const [activeId, setActiveId] = useState(null);
@@ -449,7 +462,7 @@ export default function StageAdvance() {
 
   /* ——— load shows + inventory (personal, per signed-in user) ——— */
   useEffect(() => {
-    if (!user) { setShows([]); setInventoryItems([]); setLoaded(false); return; }
+    if (!user) { setShows([]); setInventoryItems([]); setGroupColors({}); setLoaded(false); return; }
     (async () => {
       try {
         const r = await storage.get(STORAGE_KEY);
@@ -458,8 +471,26 @@ export default function StageAdvance() {
       } catch (e) { setShows([]); }
       setLoaded(true);
     })();
+    (async () => {
+      try {
+        const r = await storage.get(GROUP_COLORS_KEY);
+        setGroupColors(r?.value ? JSON.parse(r.value) : {});
+      } catch (e) { setGroupColors({}); }
+    })();
     loadInventory();
   }, [user]);
+
+  const saveGroupColor = async (group, hex) => {
+    const next = { ...groupColors };
+    if (hex) next[group] = hex; else delete next[group];
+    setGroupColors(next);
+    try { await storage.set(GROUP_COLORS_KEY, JSON.stringify(next)); }
+    catch (e) { console.error("couldn't save group color", e); }
+  };
+
+  const groupColor = (g) => groupColors[g] || GROUPS[g]?.color || "#999";
+  const groupTextColor = (g) => (groupColors[g] ? readableTextColor(groupColors[g]) : GROUPS[g]?.text || "#e7e6e2");
+  const channelColor = (c) => c.color || groupColor(c.group);
 
   /* ——— save shows (debounced) ——— */
   useEffect(() => {
@@ -699,7 +730,7 @@ export default function StageAdvance() {
     const rows = active.channels.map((c, i) => `
       <tr>
         <td class="num">${i + 1}</td>
-        <td><span class="sw" style="background:${GROUPS[c.group]?.color || "#999"}"></span>${esc(c.name)}</td>
+        <td><span class="sw" style="background:${channelColor(c)}"></span>${esc(c.name)}</td>
         <td>${esc(c.mic)}${isRental(c.mic) ? " <b>(RENTAL)</b>" : ""}</td>
         <td>${c.stand === "None" ? "—" : esc(c.stand)}</td>
         <td class="p48">${c.phantom ? "48V" : ""}</td>
@@ -816,7 +847,7 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
     .sa-chip { border:none; border-radius:5px; padding:5px 10px; font-size:12px; font-weight:700; cursor:pointer; opacity:.92; }
     .sa-chip:hover { opacity:1; transform: translateY(-1px); }
     .sa-groupname { font-size:11px; text-transform:uppercase; letter-spacing:.12em; color:#8a8f98; margin:10px 0 5px; }
-    .sa-ch { display:grid; grid-template-columns: 22px 34px 6px 1.4fr 1.3fr 1fr 44px 1.5fr 72px 88px; gap:8px; align-items:center; padding:6px 8px; border-bottom:1px solid #26282f; border-top:2px solid transparent; }
+    .sa-ch { display:grid; grid-template-columns: 22px 34px 16px 1.4fr 1.3fr 1fr 44px 1.5fr 72px 88px; gap:8px; align-items:center; padding:6px 8px; border-bottom:1px solid #26282f; border-top:2px solid transparent; }
     .sa-ch:nth-child(odd of .sa-ch) { background:#1c1e23; }
     .sa-ch.drag-over { border-top:2px solid #E8B93E; }
     .sa-ch.dragging { opacity:.35; }
@@ -825,7 +856,10 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
     .sa-handle:hover { color:#e7e6e2; }
     .sa-handle:active { cursor:grabbing; }
     .sa-chnum { font-weight:800; font-size:15px; text-align:right; color:#8a8f98; }
-    .sa-strip { width:6px; height:30px; border-radius:2px; }
+    .sa-strip { width:16px; height:30px; border-radius:2px; }
+    .sa-ch input.sa-strip { padding:0; border:none; cursor:pointer; background:none; -webkit-appearance:none; appearance:none; }
+    .sa-ch input.sa-strip::-webkit-color-swatch-wrapper { padding:0; }
+    .sa-ch input.sa-strip::-webkit-color-swatch { border:none; border-radius:2px; }
     .sa-ch input, .sa-ch select { background:#17181c; border:1px solid #2c2f37; color:#e7e6e2; border-radius:5px; padding:5px 7px; font-size:13px; width:100%; box-sizing:border-box; }
     .sa-micwrap { display:flex; flex-direction:column; gap:4px; min-width:0; }
     .sa-micwrap input { border-color:#9A6BC9; }
@@ -855,7 +889,7 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
     .sa-check input { width:17px; height:17px; accent-color:#E8B93E; }
     h2.sa-h2 { font-size:14px; text-transform:uppercase; letter-spacing:.14em; color:#e7e6e2; margin:0 0 12px; font-weight:800; }
     @media (max-width: 780px) {
-      .sa-ch { grid-template-columns: 18px 26px 5px 1fr 1fr 40px; grid-auto-rows:auto; }
+      .sa-ch { grid-template-columns: 18px 26px 14px 1fr 1fr 40px; grid-auto-rows:auto; }
       .sa-colhead { display:none; }
       .sa-ch .m-stand { grid-column: 4 / 5; }
       .sa-ch .m-note { grid-column: 4 / 6; }
@@ -1461,6 +1495,26 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
       </div>
 
       <div className="sa-card">
+        <h2 className="sa-h2">Channel colors</h2>
+        <div className="sa-sub" style={{ marginBottom: 10 }}>
+          Set your own color per category — matches whatever convention you already use on your console.
+          Any single channel can still be recolored individually from its row (right-click the color
+          swatch to reset that one channel back to its group color).
+        </div>
+        {GROUP_ORDER.map((g) => (
+          <div key={g} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0" }}>
+            <input type="color" value={groupColor(g)}
+              style={{ width: 32, height: 28, padding: 0, border: "none", background: "none", cursor: "pointer" }}
+              onChange={(e) => saveGroupColor(g, e.target.value)} />
+            <div style={{ flex: 1 }}>{g}</div>
+            {groupColors[g] && (
+              <button className="sa-btn ghost" style={{ fontSize: 12 }} onClick={() => saveGroupColor(g, null)}>Reset</button>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div className="sa-card">
         <h2 className="sa-h2">Your data</h2>
         <div className="sa-sub" style={{ marginBottom: 12 }}>
           Everything below covers your own shows, locker, and questionnaire inbox — see our{" "}
@@ -1539,7 +1593,7 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
             <div className="sa-palette">
               {CATALOG.filter((c) => c.group === g).map((c) => (
                 <button key={c.label} className="sa-chip"
-                  style={{ background: GROUPS[g].color, color: GROUPS[g].text }}
+                  style={{ background: groupColor(g), color: groupTextColor(g) }}
                   onClick={() => addChannel(c)}>
                   + {c.label}
                 </button>
@@ -1595,7 +1649,10 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
                   }}
                   onDragEnd={() => { setDragIdx(null); setOverIdx(null); }}>⠿</div>
                 <div className="sa-chnum">{i + 1}</div>
-                <div className="sa-strip" style={{ background: GROUPS[c.group]?.color || "#555" }} />
+                <input type="color" className="sa-strip" value={channelColor(c)}
+                  title={c.color ? "Channel color — right-click to reset to group default" : "Channel color — click to override just this row"}
+                  onChange={(e) => updateChannel(c.id, { color: e.target.value })}
+                  onContextMenu={(e) => { e.preventDefault(); updateChannel(c.id, { color: null }); }} />
                 <input value={c.name} onChange={(e) => updateChannel(c.id, { name: e.target.value })} />
                 <div className="sa-micwrap">
                   <select
@@ -1751,7 +1808,7 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
             <tr key={c.id}>
               <td className="ps-num">{i + 1}</td>
               <td>
-                <span className="ps-swatch" style={{ background: GROUPS[c.group]?.color || "#999" }} />
+                <span className="ps-swatch" style={{ background: channelColor(c) }} />
                 {c.name}
               </td>
               <td>{c.mic}{isRental(c.mic) ? " (RENTAL)" : ""}</td>
