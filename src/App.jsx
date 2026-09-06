@@ -915,6 +915,7 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
     .sa-member { display:grid; grid-template-columns: 1.2fr 1.2fr 1fr 36px; gap:8px; align-items:end; padding:8px 0; border-bottom:1px dashed #2c2f37; }
     .sa-empty { text-align:center; color:#8a8f98; padding:40px 20px; }
     .sa-colhead { display:grid; grid-template-columns: 22px 34px 6px 1.4fr 1.3fr 1fr 44px 1.5fr 72px 88px; gap:8px; padding:4px 8px; font-size:10px; text-transform:uppercase; letter-spacing:.1em; color:#5a5f6a; }
+    .sa-fieldlabel { display:none; font-size:9px; text-transform:uppercase; letter-spacing:.06em; color:#8a8f98; margin-bottom:2px; }
     .sa-sb.override { border-color:#E8B93E !important; color:#E8B93E; font-weight:800; }
     .sa-sb.dupe { border-color:#D64545 !important; color:#ff8f8f; font-weight:800; }
     .sa-customrow { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:14px; padding-top:12px; border-top:1px solid #2c2f37; }
@@ -922,12 +923,15 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
     .sa-check input { width:17px; height:17px; accent-color:#E8B93E; }
     h2.sa-h2 { font-size:14px; text-transform:uppercase; letter-spacing:.14em; color:#e7e6e2; margin:0 0 12px; font-weight:800; }
     @media (max-width: 780px) {
-      .sa-ch { grid-template-columns: 18px 26px 14px 1fr 1fr 40px; grid-auto-rows:auto; }
+      .sa-ch { grid-template-columns: 18px 26px 28px 1fr 1fr 40px; grid-auto-rows:auto; }
       .sa-colhead { display:none; }
-      .sa-ch .m-stand { grid-column: 4 / 5; }
+      .sa-ch .m-standwrap { grid-column: 4 / 5; }
       .sa-ch .m-note { grid-column: 4 / 6; }
-      .sa-ch .m-sb { grid-column: 6 / 7; }
+      .sa-ch .m-sbwrap { grid-column: 6 / 7; }
       .sa-ch .sa-rowbtns { grid-column: 5 / 7; justify-content:flex-end; }
+      .sa-fieldlabel { display:block; }
+      .sa-handle { opacity:.3; }
+      .sa-rowbtns button { font-size:20px; padding:8px 10px; background:#2c2f37; border:1px solid #3a3e48; }
       .sa-member { grid-template-columns: 1fr 1fr; }
       .sa-tabs { margin-left:0; max-width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch; }
       .sa-tabs > * { flex-shrink:0; }
@@ -1737,10 +1741,13 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
                       onChange={(e) => updateChannel(c.id, { mic: e.target.value })} />
                   )}
                 </div>
-                <select className="m-stand" value={c.stand}
-                  onChange={(e) => updateChannel(c.id, { stand: e.target.value })}>
-                  {STAND_OPTIONS.map((s) => <option key={s}>{s}</option>)}
-                </select>
+                <div className="m-standwrap">
+                  <span className="sa-fieldlabel">Stand</span>
+                  <select className="m-stand" value={c.stand}
+                    onChange={(e) => updateChannel(c.id, { stand: e.target.value })}>
+                    {STAND_OPTIONS.map((s) => <option key={s}>{s}</option>)}
+                  </select>
+                </div>
                 <div className="sa-48">
                   <button className={c.phantom ? "on" : ""} title="Phantom power"
                     onClick={() => updateChannel(c.id, { phantom: !c.phantom })}>48V</button>
@@ -1748,16 +1755,19 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
                 <input className="m-note" value={c.note}
                   placeholder="notes — e.g. picks up on chorus only"
                   onChange={(e) => updateChannel(c.id, { note: e.target.value })} />
-                <select
-                  className={`sa-sb m-sb${sbDupeSet.has(c.stagebox ?? i + 1) ? " dupe" : c.stagebox != null ? " override" : ""}`}
-                  title="Stage box line (defaults to channel number)"
-                  value={c.stagebox ?? ""}
-                  onChange={(e) => updateChannel(c.id, { stagebox: e.target.value === "" ? null : Number(e.target.value) })}>
-                  <option value="">{i + 1} ·auto</option>
-                  {Array.from({ length: 48 }, (_, n) => n + 1).map((n) => (
-                    <option key={n} value={n}>{n}</option>
-                  ))}
-                </select>
+                <div className="m-sbwrap">
+                  <span className="sa-fieldlabel">Stage box</span>
+                  <select
+                    className={`sa-sb m-sb${sbDupeSet.has(c.stagebox ?? i + 1) ? " dupe" : c.stagebox != null ? " override" : ""}`}
+                    title="Stage box line (defaults to channel number)"
+                    value={c.stagebox ?? ""}
+                    onChange={(e) => updateChannel(c.id, { stagebox: e.target.value === "" ? null : Number(e.target.value) })}>
+                    <option value="">{i + 1} ·auto</option>
+                    {Array.from({ length: 48 }, (_, n) => n + 1).map((n) => (
+                      <option key={n} value={n}>{n}</option>
+                    ))}
+                  </select>
+                </div>
                 <div className="sa-rowbtns no-print">
                   <button title="Move up" onClick={() => moveChannel(i, -1)}>↑</button>
                   <button title="Move down" onClick={() => moveChannel(i, 1)}>↓</button>
