@@ -929,7 +929,11 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
       .sa-ch .m-sb { grid-column: 6 / 7; }
       .sa-ch .sa-rowbtns { grid-column: 5 / 7; justify-content:flex-end; }
       .sa-member { grid-template-columns: 1fr 1fr; }
-      .sa-tabs { margin-left:0; }
+      .sa-tabs { margin-left:0; max-width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch; }
+      .sa-tabs > * { flex-shrink:0; }
+      .sa-tabs > .sa-sub { display:none; }
+      .sa-strip { width:28px; height:36px; }
+      .sa-swatch { width:28px; height:28px; }
     }
     /* ——— PRINT: hide the app, show the crew sheet ——— */
     .print-sheet { display:none; }
@@ -1088,7 +1092,7 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
     <div className="sa-grid">
       {/* Inbox */}
       <div className="sa-card sa-inbox">
-        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
           <h2 className="sa-h2" style={{ flex: 1, color: "#4CC3C9" }}>
             Questionnaire inbox — {submissions.length}
           </h2>
@@ -1121,7 +1125,7 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
                 {(s.members || []).length} members · {[s.contactName, s.phone, s.email].filter(Boolean).join(" · ")} · {s.submittedAt}
               </div>
             </div>
-            <div style={{ display: "flex", gap: 6 }}>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               <button className="sa-btn primary" onClick={() => importSubmission(s)}>Import as show</button>
               <button className="sa-btn ghost danger" onClick={() => removeSubmission(s.id)}>Dismiss</button>
             </div>
@@ -1152,7 +1156,7 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
             <div style={{ fontWeight: 700, fontSize: 16 }}>{s.band || "Untitled show"}</div>
             <div className="sa-sub">{[s.date, s.venue].filter(Boolean).join(" · ") || "no date/venue"} — {s.channels.length} ch</div>
           </div>
-          <div style={{ display: "flex", gap: 4 }}>
+          <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
             <button className="sa-btn ghost" onClick={(e) => { e.stopPropagation(); duplicateShow(s.id); }}>Duplicate</button>
             <button className="sa-btn ghost danger" onClick={(e) => { e.stopPropagation(); deleteShow(s.id); }}>Delete</button>
           </div>
@@ -1399,7 +1403,7 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
                 : "Fill these in yourself — saved for next time."}
             </div>
             {renderTagFields(lockerLookup, (patch) => setLockerLookup((prev) => ({ ...prev, ...patch })))}
-            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+            <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
               <button className="sa-btn primary" onClick={confirmLockerLookup}>Confirm &amp; add</button>
               <button className="sa-btn ghost" onClick={() => setLockerLookup(null)}>Cancel</button>
             </div>
@@ -1448,7 +1452,7 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
                   {renderTagFields(item, (patch) => updateImportReviewItem(idx, patch))}
                 </div>
               ))}
-              <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+              <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
                 <button className="sa-btn primary" onClick={confirmImport}>
                   Import {importReview.items.filter((i) => i.selected).length} item{importReview.items.filter((i) => i.selected).length === 1 ? "" : "s"}
                 </button>
@@ -1463,7 +1467,7 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
               <textarea className="sa-input" rows={8} value={pasteText}
                 placeholder={"SM57\n2x SM58\nBeta 52A (1)\n…"}
                 onChange={(e) => setPasteText(e.target.value)} />
-              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+              <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
                 <button className="sa-btn primary" onClick={startPasteImport} disabled={importBusy || !pasteText.trim()}>
                   {importBusy ? "Recognizing…" : "Parse & review"}
                 </button>
@@ -1515,8 +1519,8 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
           <div className="sa-sub" style={{ marginBottom: 8 }}>
             Shown to bands on your Band Form link instead of your email. Leave blank to just show your email.
           </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <input className="sa-input" style={{ flex: 1 }} value={settingsNameDraft}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <input className="sa-input" style={{ flex: 1, minWidth: 160 }} value={settingsNameDraft}
               placeholder={user?.email}
               onChange={(e) => setSettingsNameDraft(e.target.value)} />
             <button className="sa-btn primary" onClick={saveDisplayName}>
@@ -1536,7 +1540,7 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
         </div>
         {GROUP_ORDER.map((g) => (
           <div key={g} style={{ padding: "6px 0", borderBottom: "1px dashed #2c2f37" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               <button type="button" className="sa-strip" style={{ width: 28, height: 28, background: groupColor(g), border: "none" }}
                 onClick={() => setOpenGroupPickerFor(openGroupPickerFor === g ? null : g)} />
               <div style={{ flex: 1 }}>{g}</div>
@@ -1656,7 +1660,7 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
 
       {/* Input list */}
       <div className="sa-card">
-        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
           <h2 className="sa-h2" style={{ flex: 1 }}>Input list — {active.channels.length} channels</h2>
           {active.channels.length > 1 && (
             <button className="sa-btn no-print" onClick={sortByGroup}
