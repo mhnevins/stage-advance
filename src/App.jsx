@@ -9,6 +9,9 @@ import { exportMyData, deleteMyAccount } from "./lib/account";
 import * as submissionsApi from "./lib/submissions";
 import Login from "./components/Login";
 import PrivacyNotice from "./components/PrivacyNotice";
+import RequestAccess from "./components/RequestAccess";
+import AdminRequests from "./components/AdminRequests";
+import Landing from "./components/Landing";
 
 /* ————————————————————————————————————————————————
    STAGE ADVANCE v3 — input list & gear planner for live sound
@@ -43,6 +46,13 @@ const needsPhantom = (mic) =>
   CONDENSERS.some((c) => mic === c) || mic === "DI (active)" || mic === "Pro48 (active DI)";
 
 const STAND_OPTIONS = ["Tall boom", "Short boom", "Straight", "Drum clamp", "Desk stand", "None"];
+
+/* Standard theatrical stage-position abbreviations (from the performer's
+   perspective facing the audience). "Other" is the same manual escape
+   hatch used for rental mics — a venue-specific spot (e.g. "MONITOR
+   WORLD") that isn't one of these is just typed in directly. */
+const STAGE_POSITIONS = ["USL", "USC", "USR", "SL", "C", "SR", "DSL", "DSC", "DSR"];
+const POSITION_OTHER = "__other_position";
 
 /* ——— Mic/DI recognition (Phase 3): fixed vocabulary shared with
    supabase/migrations/0002_mic_library.sql and netlify/functions/lookup-mic.js ——— */
@@ -218,9 +228,9 @@ const CATALOG = [
   { group: "Bass", label: "Bass Cab", mic: "Telefunken M82", stand: "Short boom", useCases: ["bass-amp"] },
   { group: "Guitars", label: "Electric Gtr Amp", mic: "e906", stand: "Short boom", useCases: ["guitar-amp"] },
   { group: "Guitars", label: "Acoustic Gtr", mic: "SB-2 (passive DI)", stand: "None", di: true, useCases: ["acoustic-guitar", "di-passive"] },
-  { group: "Guitars", label: "Gtr Modeler L/R", mic: "Stereo DI", stand: "None", di: true, useCases: ["di-active", "di-passive"] },
-  { group: "Keys", label: "Keys L/R", mic: "Stereo DI", stand: "None", di: true, useCases: ["keys"] },
-  { group: "Keys", label: "Keys 2 (mono)", mic: "SB-2 (passive DI)", stand: "None", di: true, useCases: ["keys"] },
+  { group: "Guitars", label: "Gtr Modeler L/R", mic: "Stereo DI", stand: "None", di: true, useCases: ["di-active", "di-passive"], stereo: true },
+  { group: "Keys", label: "Keys L/R", mic: "Stereo DI", stand: "None", di: true, useCases: ["keys"], stereo: true },
+  { group: "Keys", label: "Keys Mono", mic: "SB-2 (passive DI)", stand: "None", di: true, useCases: ["keys"] },
   { group: "Keys", label: "Organ/Leslie", mic: "e906", stand: "Short boom", useCases: ["organ"] },
   { group: "Keys", label: "Acoustic Piano", mic: "Roswell MiniK47", stand: "Tall boom", useCases: ["piano", "overhead"] },
   { group: "Strings/Horns", label: "Fiddle/Violin", mic: "Pro48 (active DI)", stand: "None", di: true, useCases: ["strings", "di-active"] },
@@ -233,7 +243,7 @@ const CATALOG = [
   { group: "Vocals", label: "BG Vox", mic: "SM58", stand: "Tall boom", useCases: ["backing-vocal"] },
   { group: "Vocals", label: "Wireless Vox", mic: "Wireless HH", stand: "Tall boom", useCases: ["wireless"] },
   { group: "Vocals", label: "Announce/MC", mic: "SM58", stand: "Straight", useCases: ["lead-vocal"] },
-  { group: "Playback", label: "Tracks L/R", mic: "Stereo DI", stand: "None", di: true, useCases: ["playback"] },
+  { group: "Playback", label: "Tracks L/R", mic: "Stereo DI", stand: "None", di: true, useCases: ["playback"], stereo: true },
   { group: "Playback", label: "Click (to mons)", mic: "SB-2 (passive DI)", stand: "None", di: true, useCases: ["playback", "di-passive"] },
   { group: "Playback", label: "Talkback", mic: "SM58", stand: "Desk stand", useCases: ["lead-vocal"] },
 ];
@@ -249,7 +259,7 @@ const uid = () => Math.random().toString(36).slice(2, 9);
 
 const newShow = () => ({
   id: uid(), band: "", date: "", venue: "", contact: "",
-  monitors: "", notes: "", channels: [], updated: Date.now(),
+  monitors: "", notes: "", channels: [], boxes: [], updated: Date.now(),
 });
 
 const blankMember = () => ({ id: uid(), name: "", instrument: "Electric guitar", other: "", sings: "none" });
@@ -371,6 +381,11 @@ const submissionToShow = (sub) => {
 const FORM_SLUG_RE = /^\/form\/([a-zA-Z0-9-]+)\/?$/;
 const LEGACY_FORM_RE = /^\/band-form\/?$/;
 const PRIVACY_RE = /^\/privacy\/?$/;
+const REQUEST_ACCESS_RE = /^\/request-access\/?$/;
+const LOGIN_RE = /^\/login\/?$/;
+// Must match the admin email hardcoded in
+// supabase/migrations/0003_access_requests.sql and netlify/functions/invite-user.js.
+const ADMIN_EMAIL = "me@michaelnevins.com";
 
 export default function StageAdvance() {
   const { user, profile, loading: authLoading, signInWithEmail, signOut, setProfileLocally } = useAuth();
@@ -379,7 +394,10 @@ export default function StageAdvance() {
   const formSlug = formMatch ? formMatch[1] : null;
   const legacyForm = LEGACY_FORM_RE.test(window.location.pathname);
   const isPrivacyRoute = PRIVACY_RE.test(window.location.pathname);
+  const isRequestAccessRoute = REQUEST_ACCESS_RE.test(window.location.pathname);
+  const isLoginRoute = LOGIN_RE.test(window.location.pathname);
   const standalone = Boolean(formSlug) || legacyForm;
+  const isAdmin = user?.email === ADMIN_EMAIL;
 
   const [mode, setMode] = useState(standalone ? "form" : "plan"); // 'plan' | 'form' | 'locker' | 'settings'
   const [shows, setShows] = useState([]);
@@ -399,6 +417,7 @@ export default function StageAdvance() {
   const [lockerLookupBusy, setLockerLookupBusy] = useState(false);
   const [rowLookupBusyId, setRowLookupBusyId] = useState(null);
   const [showPastePanel, setShowPastePanel] = useState(false);
+  const [showBoxPanel, setShowBoxPanel] = useState(false);
   const [pasteText, setPasteText] = useState("");
   const [importBusy, setImportBusy] = useState(false);
   const [importReview, setImportReview] = useState(null); // { items: [{label, qty, type, needs_phantom, use_cases, status, selected}] }
@@ -626,6 +645,18 @@ export default function StageAdvance() {
 
   const addChannel = (item) => {
     const mic = pickMicForCatalogItem(item);
+    if (item.stereo) {
+      // Stereo presets (e.g. "Keys L/R") are one physical 2-channel box —
+      // add both channels at once instead of one row someone has to
+      // duplicate and relabel by hand.
+      const base = item.label.replace(/\s*L\/R$/, "");
+      const newChannels = [
+        { id: uid(), group: item.group, name: `${base} L`, mic, stand: item.stand, phantom: resolvePhantom(mic), note: "" },
+        { id: uid(), group: item.group, name: `${base} R`, mic, stand: item.stand, phantom: resolvePhantom(mic), note: "same box" },
+      ];
+      updateShow({ channels: [...active.channels, ...newChannels] });
+      return;
+    }
     const ch = {
       id: uid(), group: item.group, name: item.label,
       mic, stand: item.stand,
@@ -644,8 +675,36 @@ export default function StageAdvance() {
   const updateChannel = (chId, patch) =>
     updateShow({ channels: active.channels.map((c) => (c.id === chId ? { ...c, ...patch } : c)) });
 
+  /* ——— Patch boxes: named, colored groupings that serve both the
+     "lettered sub-snake" (A1-12, B1-12) and "named by location" (SL
+     box, orchestra pit) requests as one flexible feature. Lives inside
+     the show's own data — no new Supabase table needed. ——— */
+  const boxes = active?.boxes || [];
+  const boxById = (id) => boxes.find((b) => b.id === id);
+
+  const addBox = () => {
+    const name = String.fromCharCode(65 + boxes.length) || "New box";
+    updateShow({ boxes: [...boxes, { id: uid(), name, color: "#8a8f98", position: "", description: "" }] });
+  };
+  const updateBox = (boxId, patch) =>
+    updateShow({ boxes: boxes.map((b) => (b.id === boxId ? { ...b, ...patch } : b)) });
+  const removeBox = (boxId) =>
+    updateShow({
+      boxes: boxes.filter((b) => b.id !== boxId),
+      channels: active.channels.map((c) => (c.boxId === boxId ? { ...c, boxId: null, boxPos: null } : c)),
+    });
+
   const removeChannel = (chId) =>
     updateShow({ channels: active.channels.filter((c) => c.id !== chId) });
+
+  const duplicateChannel = (chId) => {
+    const idx = active.channels.findIndex((c) => c.id === chId);
+    if (idx === -1) return;
+    const copy = { ...active.channels[idx], id: uid() };
+    const arr = [...active.channels];
+    arr.splice(idx + 1, 0, copy);
+    updateShow({ channels: arr });
+  };
 
   const moveChannel = (idx, dir) => {
     const arr = [...active.channels];
@@ -701,16 +760,39 @@ export default function StageAdvance() {
   const phantomCh = active ? active.channels.map((c, i) => (c.phantom ? i + 1 : null)).filter(Boolean) : [];
   const shortages = micCounts.filter(([k, v]) => inventory[k] !== undefined && v > inventory[k]);
 
-  /* duplicate stage box lines: effective value is override ?? channel number */
+  /* Box position: effective value is override ?? this channel's running
+     count within its own box (in list order) — same "override always
+     wins, sensible default otherwise" pattern the old bare-number field
+     used, just scoped per box instead of per whole list. A channel with
+     no box has no position at all (nothing to number). */
+  const boxPosCounters = {};
+  const channelsWithBoxPos = (active ? active.channels : []).map((c) => {
+    if (!c.boxId) return { ...c, _boxPos: null };
+    boxPosCounters[c.boxId] = (boxPosCounters[c.boxId] || 0) + 1;
+    return { ...c, _boxPos: c.boxPos ?? boxPosCounters[c.boxId] };
+  });
+  const boxLabel = (c) => {
+    if (!c.boxId || c._boxPos == null) return "";
+    const b = boxById(c.boxId);
+    return b ? `${b.name}${c._boxPos}` : "";
+  };
+
+  /* duplicate box lines: two channels can't share the same position in
+     the same box (different boxes with the same number are fine). */
   const sbMap = {};
-  (active ? active.channels : []).forEach((c, i) => {
-    const v = c.stagebox ?? i + 1;
-    (sbMap[v] = sbMap[v] || []).push(i + 1);
+  channelsWithBoxPos.forEach((c, i) => {
+    if (!c.boxId) return;
+    const key = `${c.boxId}:${c._boxPos}`;
+    (sbMap[key] = sbMap[key] || []).push(i + 1);
   });
   const sbDupes = Object.entries(sbMap)
     .filter(([, chs]) => chs.length > 1)
-    .sort((a, b) => Number(a[0]) - Number(b[0]));
-  const sbDupeSet = new Set(sbDupes.map(([v]) => Number(v)));
+    .map(([key, chs]) => {
+      const [boxId, pos] = key.split(":");
+      const b = boxById(boxId);
+      return [key, `${b ? b.name : "?"}${pos}`, chs];
+    });
+  const sbDupeSet = new Set(sbDupes.map(([key]) => key));
 
   /* ——— export ——— */
   const exportText = () => {
@@ -718,10 +800,10 @@ export default function StageAdvance() {
     const pad = (s, n) => String(s ?? "").padEnd(n);
     let out = `INPUT LIST — ${active.band || "Untitled"}\n`;
     if (active.date || active.venue) out += `${active.date}${active.date && active.venue ? " · " : ""}${active.venue}\n`;
-    out += `\nCH  ${pad("SOURCE", 22)}${pad("MIC/DI", 20)}${pad("STAND", 12)}48V  ${pad("SB", 4)}NOTES\n`;
-    out += "—".repeat(82) + "\n";
-    active.channels.forEach((c, i) => {
-      out += `${pad(i + 1, 4)}${pad(c.name, 22)}${pad(c.mic, 20)}${pad(c.stand === "None" ? "—" : c.stand, 12)}${c.phantom ? "48V " : "    "} ${pad(c.stagebox ?? i + 1, 4)}${c.note || ""}\n`;
+    out += `\nCH  ${pad("SOURCE", 22)}${pad("MIC/DI", 20)}${pad("STAND", 12)}48V  ${pad("POS", 6)}${pad("SB", 5)}NOTES\n`;
+    out += "—".repeat(88) + "\n";
+    channelsWithBoxPos.forEach((c, i) => {
+      out += `${pad(i + 1, 4)}${pad(c.name, 22)}${pad(c.mic, 20)}${pad(c.stand === "None" ? "—" : c.stand, 12)}${c.phantom ? "48V " : "    "} ${pad(c.position || "—", 6)}${pad(boxLabel(c) || "—", 5)}${c.note || ""}\n`;
     });
     out += `\nMIC PULL: ${micCounts.map(([k, v]) => `${v}× ${k}${isRental(k) ? " (RENTAL)" : ""}`).join(", ") || "—"}\n`;
     const rentals = micCounts.filter(([k]) => isRental(k));
@@ -731,7 +813,7 @@ export default function StageAdvance() {
     if (shortages.length)
       out += `⚠ SHORT:  ${shortages.map(([k, v]) => `${k} (need ${v}, own ${inventory[k]})`).join(", ")}\n`;
     if (sbDupes.length)
-      out += `⚠ SB DUPES: ${sbDupes.map(([line, chs]) => `line ${line} → CH ${chs.join(" & ")}`).join(", ")}\n`;
+      out += `⚠ BOX DUPES: ${sbDupes.map(([, label, chs]) => `${label} → CH ${chs.join(" & ")}`).join(", ")}\n`;
     if (active.monitors) out += `MONITORS: ${active.monitors}\n`;
     if (active.notes) out += `NOTES:\n${active.notes}\n`;
     return out;
@@ -756,7 +838,7 @@ export default function StageAdvance() {
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
 
   const buildPrintHTML = () => {
-    const rows = active.channels.map((c, i) => `
+    const rows = channelsWithBoxPos.map((c, i) => `
       <tr>
         <td class="num">${i + 1}</td>
         <td><span class="sw" style="background:${channelColor(c)}"></span>${esc(c.name)}</td>
@@ -764,7 +846,8 @@ export default function StageAdvance() {
         <td>${c.stand === "None" ? "—" : esc(c.stand)}</td>
         <td class="p48">${c.phantom ? "48V" : ""}</td>
         <td>${esc(c.note)}</td>
-        <td class="num" style="width:auto">${c.stagebox ?? i + 1}</td>
+        <td style="width:auto">${esc(c.position) || ""}</td>
+        <td style="width:auto">${c.boxId && boxById(c.boxId) ? `<span class="sw" style="background:${boxById(c.boxId).color}"></span>` : ""}${esc(boxLabel(c))}</td>
       </tr>`).join("");
 
     const line = ([k, v]) => `<div class="line"><span>${esc(k)}${isRental(k) ? " (RENTAL)" : ""}</span><b>${v}${inventory[k] !== undefined ? ` / ${inventory[k]}` : ""}</b></div>`;
@@ -805,8 +888,8 @@ export default function StageAdvance() {
   <div><b>Channels</b>${active.channels.length}</div>
 </div>
 ${shortages.length ? `<div class="alert">⚠ OVER INVENTORY: ${shortages.map(([k, v]) => `${esc(k)} — need ${v}, own ${inventory[k]}`).join(" · ")}</div>` : ""}
-${sbDupes.length ? `<div class="alert">⚠ STAGE BOX CONFLICTS: ${sbDupes.map(([line, chs]) => `line ${line} → CH ${chs.join(" & ")}`).join(" · ")}</div>` : ""}
-<table><thead><tr><th>CH</th><th>Source</th><th>Mic / DI</th><th>Stand</th><th style="text-align:center">48V</th><th>Notes</th><th style="text-align:right">Stage Box</th></tr></thead>
+${sbDupes.length ? `<div class="alert">⚠ BOX CONFLICTS: ${sbDupes.map(([, label, chs]) => `${label} → CH ${chs.join(" & ")}`).join(" · ")}</div>` : ""}
+<table><thead><tr><th>CH</th><th>Source</th><th>Mic / DI</th><th>Stand</th><th style="text-align:center">48V</th><th>Notes</th><th>Position</th><th>Stage Box</th></tr></thead>
 <tbody>${rows}</tbody></table>
 <div class="cols">
   <div class="col"><div class="h">Mic pull</div>${micCounts.map(line).join("")}</div>
@@ -876,7 +959,7 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
     .sa-chip { border:none; border-radius:5px; padding:5px 10px; font-size:12px; font-weight:700; cursor:pointer; opacity:.92; }
     .sa-chip:hover { opacity:1; transform: translateY(-1px); }
     .sa-groupname { font-size:11px; text-transform:uppercase; letter-spacing:.12em; color:#8a8f98; margin:10px 0 5px; }
-    .sa-ch { display:grid; grid-template-columns: 22px 34px 16px 1.4fr 1.3fr 1fr 44px 1.5fr 72px 88px; gap:8px; align-items:center; padding:6px 8px; border-bottom:1px solid #26282f; border-top:2px solid transparent; }
+    .sa-ch { display:grid; grid-template-columns: 22px 34px 16px 1.3fr 1.2fr 0.9fr 44px 1.2fr 100px 100px 88px; gap:8px; align-items:center; padding:6px 8px; border-bottom:1px solid #26282f; border-top:2px solid transparent; }
     .sa-ch:nth-child(odd of .sa-ch) { background:#1c1e23; }
     .sa-ch.drag-over { border-top:2px solid #E8B93E; }
     .sa-ch.dragging { opacity:.35; }
@@ -914,7 +997,7 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
     .sa-privacy { background:#20242b; border:1px solid #3a3e48; color:#8a8f98; border-radius:8px; padding:9px 13px; font-size:12px; }
     .sa-member { display:grid; grid-template-columns: 1.2fr 1.2fr 1fr 36px; gap:8px; align-items:end; padding:8px 0; border-bottom:1px dashed #2c2f37; }
     .sa-empty { text-align:center; color:#8a8f98; padding:40px 20px; }
-    .sa-colhead { display:grid; grid-template-columns: 22px 34px 6px 1.4fr 1.3fr 1fr 44px 1.5fr 72px 88px; gap:8px; padding:4px 8px; font-size:10px; text-transform:uppercase; letter-spacing:.1em; color:#5a5f6a; }
+    .sa-colhead { display:grid; grid-template-columns: 22px 34px 6px 1.3fr 1.2fr 0.9fr 44px 1.2fr 100px 100px 88px; gap:8px; padding:4px 8px; font-size:10px; text-transform:uppercase; letter-spacing:.1em; color:#5a5f6a; }
     .sa-fieldlabel { display:none; font-size:9px; text-transform:uppercase; letter-spacing:.06em; color:#8a8f98; margin-bottom:2px; }
     .sa-sb.override { border-color:#E8B93E !important; color:#E8B93E; font-weight:800; }
     .sa-sb.dupe { border-color:#D64545 !important; color:#ff8f8f; font-weight:800; }
@@ -927,6 +1010,8 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
       .sa-colhead { display:none; }
       .sa-ch .m-standwrap { grid-column: 4 / 5; }
       .sa-ch .m-note { grid-column: 4 / 6; }
+      .sa-ch .m-poswrap { grid-column: 1 / -1; display:flex; gap:8px; align-items:center; }
+      .sa-ch .m-poswrap select, .sa-ch .m-poswrap input { width:auto; flex:1; }
       .sa-ch .m-sbwrap { grid-column: 6 / 7; }
       .sa-ch .sa-rowbtns { grid-column: 5 / 7; justify-content:flex-end; }
       .sa-fieldlabel { display:block; }
@@ -1666,6 +1751,9 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
       <div className="sa-card">
         <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
           <h2 className="sa-h2" style={{ flex: 1 }}>Input list — {active.channels.length} channels</h2>
+          <button className="sa-btn no-print" onClick={() => setShowBoxPanel(!showBoxPanel)}>
+            Boxes {boxes.length > 0 ? `(${boxes.length})` : ""} {showBoxPanel ? "▴" : "▾"}
+          </button>
           {active.channels.length > 1 && (
             <button className="sa-btn no-print" onClick={sortByGroup}
               title="Arrange in console order: drums → perc → bass → guitars → keys → strings/horns → vocals → playback">
@@ -1673,15 +1761,55 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
             </button>
           )}
         </div>
+
+        {showBoxPanel && (
+          <div className="no-print" style={{ background: "#17181c", border: "1px solid #2c2f37", borderRadius: 8, padding: 12, marginBottom: 14 }}>
+            <div className="sa-sub" style={{ marginBottom: 10, fontSize: 12 }}>
+              Named, colored groupings for patch/routing — e.g. lettered sub-snakes (A, B, C…) or
+              physical locations (SL, Pit, Local). Assign a channel to one in the input list below.
+            </div>
+            {boxes.map((b) => (
+              <div key={b.id} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+                <div style={{ position: "relative" }}>
+                  <button type="button" className="sa-strip" style={{ background: b.color, border: "none" }}
+                    title="Box color"
+                    onClick={() => setOpenColorPickerId(openColorPickerId === `box-${b.id}` ? null : `box-${b.id}`)} />
+                  {openColorPickerId === `box-${b.id}` && (
+                    <>
+                      <div className="sa-swatch-overlay" onClick={() => setOpenColorPickerId(null)} />
+                      <div className="sa-swatch-popover">
+                        <ColorSwatchPicker value={b.color}
+                          onChange={(hex) => updateBox(b.id, { color: hex })}
+                          onClose={() => setOpenColorPickerId(null)} />
+                      </div>
+                    </>
+                  )}
+                </div>
+                <input className="sa-input" style={{ width: 70 }} value={b.name}
+                  placeholder="A" onChange={(e) => updateBox(b.id, { name: e.target.value })} />
+                <select className="sa-input" style={{ width: 110 }} value={STAGE_POSITIONS.includes(b.position) ? b.position : ""}
+                  onChange={(e) => updateBox(b.id, { position: e.target.value })}>
+                  <option value="">Position…</option>
+                  {STAGE_POSITIONS.map((p) => <option key={p} value={p}>{p}</option>)}
+                </select>
+                <input className="sa-input" style={{ flex: 1, minWidth: 140 }} value={b.description}
+                  placeholder="e.g. Drums" onChange={(e) => updateBox(b.id, { description: e.target.value })} />
+                <button className="sa-btn danger" onClick={() => removeBox(b.id)}>✕</button>
+              </div>
+            ))}
+            <button className="sa-btn" onClick={addBox}>+ Add box</button>
+          </div>
+        )}
+
         {active.channels.length === 0 ? (
           <div className="sa-empty">Tap instruments above to start the patch.</div>
         ) : (
           <div className="sa-mono">
             <div className="sa-colhead">
               <div></div><div>CH</div><div></div><div>Source</div><div>Mic / DI</div>
-              <div>Stand</div><div>48V</div><div>Notes</div><div>Stage Box</div><div></div>
+              <div>Stand</div><div>48V</div><div>Notes</div><div>Position</div><div>Stage Box</div><div></div>
             </div>
-            {active.channels.map((c, i) => (
+            {channelsWithBoxPos.map((c, i) => (
               <div key={c.id}
                 className={`sa-ch${overIdx === i && dragIdx !== null ? " drag-over" : ""}${dragIdx === i ? " dragging" : ""}${shortages.some(([k]) => k === c.mic) ? " short-row" : ""}`}
                 title={shortages.some(([k]) => k === c.mic) ? "Over inventory — swap the mic or tag it as a rental" : undefined}
@@ -1719,7 +1847,7 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
                     onChange={(e) => {
                       const v = e.target.value;
                       if (v === RENTAL) updateChannel(c.id, { mic: "" });
-                      else updateChannel(c.id, { mic: v, phantom: resolvePhantom(v) ? true : c.phantom });
+                      else updateChannel(c.id, { mic: v, phantom: resolvePhantom(v) });
                     }}>
                     <optgroup label="Your locker">
                       {Object.keys(inventory).map((m) => (
@@ -1755,20 +1883,57 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
                 <input className="m-note" value={c.note}
                   placeholder="notes — e.g. picks up on chorus only"
                   onChange={(e) => updateChannel(c.id, { note: e.target.value })} />
+                <div className="m-poswrap">
+                  <span className="sa-fieldlabel">Position</span>
+                  <select
+                    value={STAGE_POSITIONS.includes(c.position) ? c.position : (c.position ? POSITION_OTHER : "")}
+                    onChange={(e) => updateChannel(c.id, { position: e.target.value })}>
+                    <option value="">—</option>
+                    {STAGE_POSITIONS.map((p) => <option key={p} value={p}>{p}</option>)}
+                    <option value={POSITION_OTHER}>Other…</option>
+                  </select>
+                  {c.position && !STAGE_POSITIONS.includes(c.position) && (
+                    <input
+                      value={c.position === POSITION_OTHER ? "" : c.position}
+                      placeholder="e.g. Monitor World"
+                      autoFocus={c.position === POSITION_OTHER}
+                      onChange={(e) => updateChannel(c.id, { position: e.target.value })} />
+                  )}
+                </div>
                 <div className="m-sbwrap">
                   <span className="sa-fieldlabel">Stage box</span>
-                  <select
-                    className={`sa-sb m-sb${sbDupeSet.has(c.stagebox ?? i + 1) ? " dupe" : c.stagebox != null ? " override" : ""}`}
-                    title="Stage box line (defaults to channel number)"
-                    value={c.stagebox ?? ""}
-                    onChange={(e) => updateChannel(c.id, { stagebox: e.target.value === "" ? null : Number(e.target.value) })}>
-                    <option value="">{i + 1} ·auto</option>
-                    {Array.from({ length: 48 }, (_, n) => n + 1).map((n) => (
-                      <option key={n} value={n}>{n}</option>
+                  <select className="sa-input"
+                    style={{
+                      marginBottom: boxes.length && c.boxId ? 4 : 0,
+                      fontWeight: 800,
+                      ...(c.boxId && boxById(c.boxId)
+                        ? { background: boxById(c.boxId).color, color: readableTextColor(boxById(c.boxId).color), borderColor: boxById(c.boxId).color }
+                        : {}),
+                    }}
+                    value={c.boxId || ""}
+                    onChange={(e) => updateChannel(c.id, { boxId: e.target.value || null, boxPos: null })}>
+                    <option value="" style={{ background: "#17181c", color: "#e7e6e2" }}>No box</option>
+                    {boxes.map((b) => (
+                      <option key={b.id} value={b.id} style={{ background: b.color, color: readableTextColor(b.color) }}>
+                        {b.name}
+                      </option>
                     ))}
                   </select>
+                  {c.boxId && (
+                    <select
+                      className={`sa-sb m-sb${sbDupeSet.has(`${c.boxId}:${c._boxPos}`) ? " dupe" : c.boxPos != null ? " override" : ""}`}
+                      title="Position within this box (defaults to order in the list)"
+                      value={c.boxPos ?? ""}
+                      onChange={(e) => updateChannel(c.id, { boxPos: e.target.value === "" ? null : Number(e.target.value) })}>
+                      <option value="">{c._boxPos} ·auto</option>
+                      {Array.from({ length: 48 }, (_, n) => n + 1).map((n) => (
+                        <option key={n} value={n}>{n}</option>
+                      ))}
+                    </select>
+                  )}
                 </div>
                 <div className="sa-rowbtns no-print">
+                  <button title="Duplicate" onClick={() => duplicateChannel(c.id)}>⧉</button>
                   <button title="Move up" onClick={() => moveChannel(i, -1)}>↑</button>
                   <button title="Move down" onClick={() => moveChannel(i, 1)}>↓</button>
                   <button title="Remove" onClick={() => removeChannel(c.id)}>✕</button>
@@ -1786,10 +1951,10 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
         </div>
       )}
 
-      {/* Duplicate stage box warning */}
+      {/* Duplicate box position warning */}
       {sbDupes.length > 0 && (
         <div className="sa-shortbanner">
-          ⚠ Stage box conflicts: {sbDupes.map(([line, chs]) => `line ${line} claimed by CH ${chs.join(" & ")}`).join(" · ")}. Reassign so each line has one channel.
+          ⚠ Box conflicts: {sbDupes.map(([, label, chs]) => `${label} claimed by CH ${chs.join(" & ")}`).join(" · ")}. Reassign so each box line has one channel.
         </div>
       )}
 
@@ -1856,7 +2021,7 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
 
       {sbDupes.length > 0 && (
         <div className="ps-alert">
-          ⚠ STAGE BOX CONFLICTS: {sbDupes.map(([line, chs]) => `line ${line} → CH ${chs.join(" & ")}`).join(" · ")}
+          ⚠ BOX CONFLICTS: {sbDupes.map(([, label, chs]) => `${label} → CH ${chs.join(" & ")}`).join(" · ")}
         </div>
       )}
 
@@ -1865,11 +2030,12 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
           <tr>
             <th>CH</th><th>Source</th><th>Mic / DI</th><th>Stand</th>
             <th style={{ textAlign: "center" }}>48V</th><th>Notes</th>
-            <th style={{ textAlign: "right" }}>Stage Box</th>
+            <th>Position</th>
+            <th>Stage Box</th>
           </tr>
         </thead>
         <tbody>
-          {active.channels.map((c, i) => (
+          {channelsWithBoxPos.map((c, i) => (
             <tr key={c.id}>
               <td className="ps-num">{i + 1}</td>
               <td>
@@ -1880,7 +2046,13 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
               <td>{c.stand === "None" ? "—" : c.stand}</td>
               <td className="ps-48">{c.phantom ? "48V" : ""}</td>
               <td>{c.note}</td>
-              <td className="ps-num" style={{ width: "auto" }}>{c.stagebox ?? i + 1}</td>
+              <td>{c.position || ""}</td>
+              <td style={{ width: "auto" }}>
+                {c.boxId && boxById(c.boxId) && (
+                  <span className="ps-swatch" style={{ background: boxById(c.boxId).color }} />
+                )}
+                {boxLabel(c)}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -1938,13 +2110,16 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
             <div className="sa-logo">Stage<span>Advance</span></div>
             <div className="sa-sub">input lists · mic pulls · stand counts — before you load the van</div>
           </div>
-          {!isPrivacyRoute && !standalone && user && (
+          {!isPrivacyRoute && !isRequestAccessRoute && !isLoginRoute && !standalone && user && (
             <div className="sa-tabs no-print" style={{ alignItems: "center" }}>
               <div className="sa-sub" style={{ marginRight: 4 }}>Signed in as {user.email}</div>
               <button className={`sa-tab${mode === "plan" ? " on" : ""}`} onClick={() => setMode("plan")}>Planner</button>
               <button className={`sa-tab${mode === "locker" ? " on" : ""}`} onClick={() => setMode("locker")}>Locker</button>
               <button className={`sa-tab${mode === "form" ? " on" : ""}`} onClick={() => { setMode("form"); setFormDone(false); }}>Band Form</button>
               <button className={`sa-tab${mode === "settings" ? " on" : ""}`} onClick={() => setMode("settings")}>Settings</button>
+              {isAdmin && (
+                <button className={`sa-tab${mode === "admin-requests" ? " on" : ""}`} onClick={() => setMode("admin-requests")}>Requests</button>
+              )}
               <button className="sa-tab" onClick={signOut}>Sign out</button>
             </div>
           )}
@@ -1952,6 +2127,10 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
 
         {isPrivacyRoute ? (
           <PrivacyNotice />
+        ) : isRequestAccessRoute ? (
+          <RequestAccess />
+        ) : isLoginRoute && !user ? (
+          <Login onSignIn={signInWithEmail} />
         ) : legacyForm ? (
           <div className="sa-card" style={{ maxWidth: 480, margin: "60px auto", textAlign: "center", padding: 32 }}>
             <h2 className="sa-h2">This link has moved</h2>
@@ -1972,9 +2151,11 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
         ) : !standalone && authLoading ? (
           <div className="sa-sub" style={{ textAlign: "center", margin: 60 }}>Loading…</div>
         ) : !standalone && !user ? (
-          <Login onSignIn={signInWithEmail} />
+          <Landing />
         ) : (
-          mode === "form" ? renderForm() : mode === "locker" ? renderLocker() : mode === "settings" ? renderSettings() : active ? renderShow() : renderShowList()
+          mode === "form" ? renderForm() : mode === "locker" ? renderLocker() : mode === "settings" ? renderSettings()
+            : mode === "admin-requests" && isAdmin ? <AdminRequests />
+            : active ? renderShow() : renderShowList()
         )}
       </div>
       {active && mode === "plan" && !standalone && user && renderPrintSheet()}

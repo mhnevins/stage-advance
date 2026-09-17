@@ -12,7 +12,7 @@ Brian Martinez (university musical theatre sound design), Alvaro
 Fernandez (musical theatre — 28 cast + band). All initial feedback has
 been positive; the app is being used on real shows already.
 
-_Last updated: 2026-09-13._
+_Last updated: 2026-09-17._
 
 ---
 
@@ -44,8 +44,28 @@ signal in this round.
   not the only one to check.
 
 ### Sub-snakes / multiple stage boxes / patch locations
-Two related but distinct framings — worth reconciling into one design,
-not building both separately.
+✅ **Built (2026-09-17).** Approved by Michael ("go ahead, I'll review
+your ideas when done"), then refined further using a real reference
+input-list template Michael shared (confirmed the "letter + sequential
+number" shape — A1-12, C1-8, D1-11, B1-10 — and a legend format of
+`name - position - description`, e.g. "A - DSL - DRUMS").
+
+- Each show now has its own **Boxes** panel (toggle button next to
+  "Sort by group"): add/rename/recolor/describe boxes, optionally tag
+  each with a Stage Position.
+- Each channel can be assigned to a box; its position within that box
+  auto-numbers sequentially (override-able, same "default + always
+  editable" pattern the old plain-number field used) and prints as
+  e.g. "A3".
+- Duplicate detection is now scoped per box (two channels both in box
+  A at position 3 conflict; A3 and B3 don't).
+- Lives entirely inside the show's own data — no new Supabase table.
+- ✅ **Confirmed working (2026-09-17)** by Michael in a real session,
+  including the box-color-in-the-dropdown and color-in-print follow-ups.
+
+Correction to the framing below: today's "Stage Box" field used to be
+just a bare numeric override, not any kind of naming/grouping concept —
+Harrison's ask needed new functionality, not reuse of existing behavior.
 
 - **Harrison:** wants to use the existing Stage Box field as a true
   sub-snake concept — assign and color-code channels into named snakes,
@@ -59,25 +79,27 @@ not building both separately.
   this before building two separate things.
 
 ### Stage Position field
-Michael's own idea, prioritized — addresses the same underlying need as
-the stage-box/sub-snake requests above from a different angle (crew
-placement, not signal routing).
+✅ **Built (2026-09-17), together with Boxes below** — Michael shared a
+real reference input-list template that confirmed Stage Position and
+Stage Box are genuinely two separate columns (not one), and that
+"MONITOR WORLD"/"HR"-style venue-specific spots show up alongside the
+standard theatrical abbreviations — confirming the dropdown + free-text
+shape was right.
 
 - A per-channel field, **dropdown + free-text**, telling the crew where
   on stage a mic or box physically goes. Common on professional input
   lists.
-- Consider whether this and the sub-snake/box work above should share
-  one UI element or stay separate (position ≠ routing, but they're
-  often shown together on real input lists — see the outputs reference
-  table above, which combines position with routing in one column).
+- Implemented as its own dropdown (USL/USC/USR/SL/C/SR/DSL/DSC/DSR +
+  "Other…" free text) — same manual-escape-hatch pattern as rental
+  mics. New column in the input list, exports, and both print views.
 
 ---
 
 ## Input list / channel editing
 
 ### Auto-pair stereo inputs into two channels
-Two independent reports of the same friction — worth prioritizing as a
-quick usability win even outside the "top 3" above.
+✅ **Done and confirmed working (2026-09-17).** Two independent reports
+of the same friction.
 
 - **Thomas:** picking Keys L/R only added one channel; had to add it
   twice and manually relabel L/R. Suggests either auto-creating both
@@ -85,8 +107,33 @@ quick usability win even outside the "top 3" above.
   buttons — fewer taps, works better on touch devices.
 - **Brian:** same issue with Stereo DI — only creates one input instead
   of two.
-- 🟡 Also from Michael: the current "Keys 2 (mono)" preset label is
-  confusing — rename to "Keys Mono."
+- **Decision (Michael, 2026-09-17):** auto-create both channels from
+  one click (not separate L/R buttons). Implemented: the three
+  stereo-DI catalog presets (Keys L/R, Gtr Modeler L/R, Tracks L/R) now
+  add two channels at once ("X L" / "X R", same resolved mic, "same
+  box" note on the R channel — matching how the Band Form's own
+  auto-generation already handled Keys). Verified via build; needs a
+  real click-test in an authenticated session to fully confirm.
+- ✅ Also from Michael: "Keys 2 (mono)" preset label renamed to
+  "Keys Mono" — done same pass.
+
+### Duplicate a channel row
+✅ **Built and confirmed working (2026-09-17).** A "⧉" button sits next
+to ↑/↓/✕ on each channel row — click it, an exact copy appears directly
+below, then slide it into place with the existing move buttons.
+
+🔴 **Brian** (2026-09-17, via text): wants a "Duplicate" action on a channel
+row that copies name/mic/stand, then can be slid into position on the
+input list — instead of copy-and-paste. His stated use case: bands with
+many similar channels (e.g. a drum mic'd 8 ways, or "sometimes x24" for
+larger ensembles) where he's currently re-adding and re-configuring each
+one from scratch. Michael's framing in the exchange, which Brian
+confirmed matches what he wants: "Duplicate" button on a row → new copy
+appears → reorder it into place using the existing move up/down
+controls. Flagged high priority — pairs naturally with the existing
+per-row actions and reordering already in the channel list; likely a
+small, self-contained addition relative to its usefulness for anyone
+with repeated similar channels (drum kits, horn sections, choirs).
 
 ### More Mic/DI type options
 - **Thomas:** missing a few input types — e.g. XLR-out from an amp with
@@ -132,6 +179,11 @@ quick usability win even outside the "top 3" above.
 ## Bigger/strategic ideas
 
 ### Console export (X32 / M32, possibly via Mixing Station)
+🔵 **Decided (2026-09-17): roadmap item, not building now.** Michael's
+call — keep this under consideration for later rather than scoping it
+today; revisit once there's more clarity on direction (direct export
+vs. Mixing Station integration vs. neither).
+
 - **Brian:** exporting input list info into a format the Behringer X32
   or Midas M32 could use to build a console preset — both are popular
   consoles at the lower end of the pro market.

@@ -39,9 +39,13 @@ export function useAuth() {
 
   const signInWithEmail = useCallback(async (email) => {
     const supabase = requireSupabase();
+    // shouldCreateUser:false closes open self-serve signup — an email with
+    // no existing account errors out instead of silently creating one.
+    // New accounts now only get created via the access-request + admin
+    // invite flow (see accessRequests.js / AdminRequests.jsx).
     const { error } = await supabase.auth.signInWithOtp({
       email,
-      options: { emailRedirectTo: window.location.origin },
+      options: { emailRedirectTo: window.location.origin, shouldCreateUser: false },
     });
     if (error) throw error;
   }, []);

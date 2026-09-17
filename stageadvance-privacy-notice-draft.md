@@ -1,11 +1,6 @@
 # StageAdvance Privacy Notice (Draft)
 
-*This is a starting draft, not a finished legal document. Placeholders are marked
-in [brackets]. Have this reviewed by a lawyer before it governs real user data —
-requirements differ if you have users in the EU (GDPR), California (CCPA), or
-if you begin charging for the product.*
-
-**Last updated:** August 27, 2026
+**Last updated:** September 17, 2026
 
 ---
 
@@ -16,8 +11,11 @@ personal mic/DI inventory, building input lists, and collecting show info
 from bands via a questionnaire. This notice explains what we collect, from
 whom, and how it's kept separate between accounts.
 
-There are two kinds of people whose information touches this app:
+There are three kinds of people whose information touches this app:
 
+- **Prospective users** — people who submit a Request Access form before
+  they have an account. Their information is used to review and grant
+  access.
 - **Engineers** — the account holders who sign up, use the planner, and send
   out questionnaire links.
 - **Band contacts** — people who fill out an engineer's questionnaire link.
@@ -26,6 +24,13 @@ There are two kinds of people whose information touches this app:
   working with.
 
 ## 2. What we collect
+
+**When you request access:**
+- First and last name, email, and company (if provided)
+- How you heard about StageAdvance, and who referred you (if applicable)
+- Anything you choose to share about yourself or your live sound work
+- Whether you opted in to occasional email updates about new features and
+  ways to support StageAdvance
 
 **When you create an engineer account:**
 - Name and email (for login and account recovery)
@@ -65,8 +70,10 @@ application itself is hosted on **Netlify**, both of which process it on our
 behalf under their own security and privacy terms. When you add a mic or DI
 that isn't already recognized, its model name (nothing else — no personal or
 show information) is sent to **Anthropic** to identify what kind of gear it
-is, so we can suggest useful defaults. We don't share your data with any
-other third party.
+is, so we can suggest useful defaults. When someone submits a request for
+access, a summary of it (name, email, company, and how they heard about us)
+is sent to a private **Slack** channel we use internally to review requests
+promptly. We don't share your data with any other third party.
 
 ## 6. Band contacts: a note on submitted information
 
@@ -82,14 +89,18 @@ Shows, inventory, and questionnaire submissions are kept until you delete
 them yourself. Deleting your account is immediate and permanent: it removes
 your login and all associated shows, inventory, and submissions right away
 — there is no grace period or recovery window, so make sure it's what you
-want before confirming.
+want before confirming. Access requests (approved or declined) are kept as
+a record of who's asked for access and why; unlike account data, there's no
+self-serve delete for these — contact us if you'd like yours removed.
 
 ## 8. Your rights
 
 You can review, edit, export, or delete your shows and inventory at any time
 from your account settings. Deleting your account there deletes everything
-associated with it immediately. For any other question about your data,
-contact support@kickandsnare.llc.
+associated with it immediately. If you opted in to email updates, you can
+ask to be removed from that list at any time. For any other question about
+your data, or to have an access request record removed, contact
+support@kickandsnare.llc.
 
 ## 9. Children's privacy
 

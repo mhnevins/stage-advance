@@ -15,7 +15,7 @@ export default function Login({ onSignIn }) {
       await onSignIn(email.trim());
       setSent(true);
     } catch {
-      setErr("Couldn't send the link — please try again.");
+      setErr("Couldn't send a link — check the email, or you may not have access yet.");
     } finally {
       setBusy(false);
     }
@@ -24,6 +24,7 @@ export default function Login({ onSignIn }) {
   return (
     <div className="sa-grid" style={{ maxWidth: 420, margin: "60px auto" }}>
       <div className="sa-card" style={{ textAlign: "center", padding: 32 }}>
+        <a href="/" className="sa-sub" style={{ fontSize: 12, display: "block", marginBottom: 10 }}>← Back</a>
         <div className="sa-logo" style={{ marginBottom: 6 }}>Stage<span>Advance</span></div>
         {sent ? (
           <>
@@ -52,6 +53,9 @@ export default function Login({ onSignIn }) {
               {busy ? "Sending…" : "Send me a login link"}
             </button>
             <div style={{ marginTop: 12 }}>
+              <a href="/request-access" className="sa-sub" style={{ fontSize: 12 }}>Don't have access yet? Request access</a>
+            </div>
+            <div style={{ marginTop: 6 }}>
               <a href="/privacy" className="sa-sub" style={{ fontSize: 12 }}>Privacy Notice</a>
             </div>
           </form>

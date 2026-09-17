@@ -9,13 +9,7 @@ export default function PrivacyNotice() {
     <div className="sa-grid" style={{ maxWidth: 720, margin: "0 auto" }}>
       <div className="sa-card">
         <h2 className="sa-h2">StageAdvance Privacy Notice</h2>
-        <div className="sa-privacy" style={{ marginBottom: 16 }}>
-          This is a starting draft, not a finished legal document. Have this reviewed by
-          a lawyer before it governs real user data — requirements differ if you have
-          users in the EU (GDPR), California (CCPA), or if you begin charging for the
-          product.
-        </div>
-        <div className="sa-sub" style={{ marginBottom: 20 }}>Last updated: August 27, 2026</div>
+        <div className="sa-sub" style={{ marginBottom: 20 }}>Last updated: September 17, 2026</div>
 
         <h3 className="sa-h2" style={{ fontSize: 15 }}>1. Who this covers</h3>
         <p className="sa-sub">
@@ -24,13 +18,21 @@ export default function PrivacyNotice() {
           bands via a questionnaire. This notice explains what we collect, from whom, and
           how it's kept separate between accounts.
         </p>
-        <p className="sa-sub">There are two kinds of people whose information touches this app:</p>
+        <p className="sa-sub">There are three kinds of people whose information touches this app:</p>
         <ul className="sa-sub">
+          <li><b>Prospective users</b> — people who submit a Request Access form before they have an account. Their information is used to review and grant access.</li>
           <li><b>Engineers</b> — the account holders who sign up, use the planner, and send out questionnaire links.</li>
           <li><b>Band contacts</b> — people who fill out an engineer's questionnaire link. They do not have accounts and did not sign up for this service directly; they're submitting information to a specific engineer they're already working with.</li>
         </ul>
 
         <h3 className="sa-h2" style={{ fontSize: 15 }}>2. What we collect</h3>
+        <p className="sa-sub"><b>When you request access:</b></p>
+        <ul className="sa-sub">
+          <li>First and last name, email, and company (if provided)</li>
+          <li>How you heard about StageAdvance, and who referred you (if applicable)</li>
+          <li>Anything you choose to share about yourself or your live sound work</li>
+          <li>Whether you opted in to occasional email updates about new features and ways to support StageAdvance</li>
+        </ul>
         <p className="sa-sub"><b>When you create an engineer account:</b></p>
         <ul className="sa-sub">
           <li>Name and email (for login and account recovery)</li>
@@ -75,8 +77,10 @@ export default function PrivacyNotice() {
           behalf under their own security and privacy terms. When you add a mic or DI
           that isn't already recognized, its model name (nothing else — no personal or
           show information) is sent to <b>Anthropic</b> to identify what kind of gear it
-          is, so we can suggest useful defaults. We don't share your data with any other
-          third party.
+          is, so we can suggest useful defaults. When someone submits a request for
+          access, a summary of it (name, email, company, and how they heard about us) is
+          sent to a private <b>Slack</b> channel we use internally to review requests
+          promptly. We don't share your data with any other third party.
         </p>
 
         <h3 className="sa-h2" style={{ fontSize: 15 }}>6. Band contacts: a note on submitted information</h3>
@@ -94,15 +98,18 @@ export default function PrivacyNotice() {
           yourself. Deleting your account is immediate and permanent: it removes your
           login and all associated shows, inventory, and submissions right away — there
           is no grace period or recovery window, so make sure it's what you want before
-          confirming.
+          confirming. Access requests (approved or declined) are kept as a record of who's
+          asked for access and why; unlike account data, there's no self-serve delete for
+          these — contact us if you'd like yours removed.
         </p>
 
         <h3 className="sa-h2" style={{ fontSize: 15 }}>8. Your rights</h3>
         <p className="sa-sub">
           You can review, edit, export, or delete your shows and inventory at any time
           from your account settings. Deleting your account there deletes everything
-          associated with it immediately. For any other question about your data,
-          contact support@kickandsnare.llc.
+          associated with it immediately. If you opted in to email updates, you can ask
+          to be removed from that list at any time. For any other question about your
+          data, or to have an access request record removed, contact support@kickandsnare.llc.
         </p>
 
         <h3 className="sa-h2" style={{ fontSize: 15 }}>9. Children's privacy</h3>
