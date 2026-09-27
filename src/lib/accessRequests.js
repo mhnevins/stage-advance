@@ -79,12 +79,12 @@ export async function decideAccessRequest(id, decision, email) {
       body: JSON.stringify({ email }),
     });
     if (!res.ok) {
+      // invite-user.js already resolves the "already registered" case
+      // itself (distinguishing a real existing account from a stale,
+      // never-completed invite) — anything it still returns as an error
+      // here is a genuine failure, not something to paper over.
       const body = await res.json().catch(() => ({}));
-      // Already-registered isn't a real failure here — the account exists
-      // either way, so still mark the request approved.
-      if (!/already registered|already exists/i.test(body.error || "")) {
-        throw new Error(body.error || "Couldn't send the invite.");
-      }
+      throw new Error(body.error || "Couldn't send the invite.");
     }
   }
 

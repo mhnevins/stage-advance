@@ -55,7 +55,31 @@ export default async (req) => {
       return new Response(JSON.stringify({ error: "Not authorized." }), { status: 403 });
     }
 
-    const { error: inviteErr } = await admin.auth.admin.inviteUserByEmail(email, { redirectTo: SITE_URL });
+    const invite = async () => admin.auth.admin.inviteUserByEmail(email, { redirectTo: SITE_URL });
+    let { error: inviteErr } = await invite();
+
+    if (inviteErr && /already.*(registered|exists)/i.test(inviteErr.message || "")) {
+      // The address already has an auth user — could be someone who
+      // genuinely already has a working account (fine, nothing to do),
+      // or a stale invite stuck from an earlier attempt that never got
+      // completed (e.g. the localhost-redirect bug from 2026-09-28,
+      // which left invited-but-unconfirmed users behind). Only the
+      // second case should actually block a fresh invite, so look the
+      // user up and decide instead of guessing from the error text alone.
+      // listUsers() returns one page (no pagination handled) — fine at
+      // this project's current user count, revisit if that changes.
+      const { data: usersPage, error: listErr } = await admin.auth.admin.listUsers();
+      if (listErr) throw inviteErr;
+      const existing = usersPage?.users?.find((u) => u.email?.toLowerCase() === email.toLowerCase());
+
+      if (existing && !existing.email_confirmed_at) {
+        const { error: deleteErr } = await admin.auth.admin.deleteUser(existing.id);
+        if (deleteErr) throw inviteErr;
+        ({ error: inviteErr } = await invite());
+      } else if (existing) {
+        inviteErr = null; // already has a real, confirmed account — nothing to send
+      }
+    }
     if (inviteErr) throw inviteErr;
 
     return new Response(JSON.stringify({ success: true }), {

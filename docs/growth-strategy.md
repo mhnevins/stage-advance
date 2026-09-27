@@ -206,15 +206,24 @@ support@kickandsnare.llc and we'll take another look." Reuses the same
 contact address already on the Privacy Notice. No RLS/policy changes —
 copy only.
 
-**Open question, not yet answered:** does calling
-`inviteUserByEmail` a second time for an email that already has an
-unconfirmed auth user (from the broken first attempt) actually resend
-a fresh invite, or error as "already registered"? The existing code
-treats that error as a soft-success (marks the row approved without
-confirming an email actually went out) — if reset-and-reapprove hits
-that path, the fix is either deleting the stray unconfirmed user in
-Supabase's dashboard first, or building a real resend using
-`admin.generateLink`. Untested as of this note.
+**Resolved (2026-09-28):** answered by hitting it for real. Reset +
+re-Approve on the stuck test request errored with "A user with this
+email address has already **been** registered" — note "been," which is
+why the original regex (`/already registered/`) missed it and surfaced
+a hard failure instead of the soft-success it was meant to catch.
+Confirms the account from the broken first invite really does block
+re-inviting; it doesn't just quietly work. **Fixed properly instead of
+patching the regex:** `invite-user.js` now looks up the existing user
+via `admin.listUsers()` when it hits this error, and only treats it as
+"already has access, nothing to do" if that user is actually confirmed.
+If unconfirmed (a stale invite, exactly this case), it deletes that
+stray user first and retries the invite once — self-healing, no manual
+Supabase cleanup needed. `decideAccessRequest`'s client-side string
+matching was removed entirely; the server now resolves this properly,
+so anything it still returns as an error is a real failure. One noted
+limitation: `listUsers()` isn't paginated, fine at this project's
+current scale, worth revisiting if the user count grows a lot. Not yet
+re-tested against the live stuck request.
 
 **Decided (2026-09-17):** feature-tiering is premature — we don't yet
 know which features are actually worth paying for, and won't until
