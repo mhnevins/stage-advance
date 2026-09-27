@@ -55,10 +55,19 @@ export default async (req) => {
       return new Response(JSON.stringify({ error: "Not authorized." }), { status: 403 });
     }
 
+    // Temporary diagnostic trail (2026-09-28) — this flow has failed
+    // silently twice already on wrong assumptions, so every attempt now
+    // reports exactly what it saw and did at each step, returned to the
+    // caller regardless of outcome. Strip this out once the invite path
+    // is confirmed reliable.
+    const debug = { step: "initial-invite" };
+
     const invite = async () => admin.auth.admin.inviteUserByEmail(email, { redirectTo: SITE_URL });
     let { error: inviteErr } = await invite();
+    debug.initialInviteError = inviteErr?.message || null;
 
     if (inviteErr && /already.*(registered|exists)/i.test(inviteErr.message || "")) {
+      debug.step = "duplicate-detected";
       // The address already has an auth user — could be someone who
       // genuinely already has a working account (fine, nothing to do),
       // or a stale invite stuck from an earlier attempt that never got
@@ -74,20 +83,41 @@ export default async (req) => {
       // listUsers() returns one page (no pagination handled) — fine at
       // this project's current user count, revisit if that changes.
       const { data: usersPage, error: listErr } = await admin.auth.admin.listUsers();
+      debug.listUsersError = listErr?.message || null;
+      debug.totalUsersOnPage = usersPage?.users?.length ?? null;
       if (listErr) throw inviteErr;
       const existing = usersPage?.users?.find((u) => u.email?.toLowerCase() === email.toLowerCase());
+      debug.existingFound = Boolean(existing);
+      if (existing) {
+        debug.existing = {
+          id: existing.id,
+          email: existing.email,
+          created_at: existing.created_at,
+          last_sign_in_at: existing.last_sign_in_at,
+          email_confirmed_at: existing.email_confirmed_at,
+        };
+      }
 
       if (existing && !existing.last_sign_in_at) {
+        debug.step = "deleting-stale-user";
         const { error: deleteErr } = await admin.auth.admin.deleteUser(existing.id);
+        debug.deleteError = deleteErr?.message || null;
         if (deleteErr) throw inviteErr;
+        debug.step = "retry-invite";
         ({ error: inviteErr } = await invite());
+        debug.retryInviteError = inviteErr?.message || null;
       } else if (existing) {
+        debug.step = "treated-as-real-account";
         inviteErr = null; // has actually signed in before — real account, nothing to send
       }
     }
-    if (inviteErr) throw inviteErr;
+    if (inviteErr) {
+      return new Response(JSON.stringify({ error: inviteErr.message, debug }), {
+        status: 502, headers: { "Content-Type": "application/json" },
+      });
+    }
 
-    return new Response(JSON.stringify({ success: true }), {
+    return new Response(JSON.stringify({ success: true, debug }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
