@@ -38,7 +38,11 @@ export async function submitAccessRequest({
   });
   if (error) {
     if (error.code === "23505") {
-      throw new Error("You've already requested access with this email — we'll be in touch.");
+      throw new Error(
+        "You've already submitted a request with this email. If it's been a while or your " +
+        "situation has changed, feel free to reach out directly at support@kickandsnare.llc " +
+        "and we'll take another look."
+      );
     }
     throw new Error("Couldn't submit your request — please try again.");
   }
@@ -87,6 +91,21 @@ export async function decideAccessRequest(id, decision, email) {
   const { error } = await client
     .from("access_requests")
     .update({ status: decision === "approve" ? "approved" : "declined", decided_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) throw error;
+}
+
+/* Sends a decided request back to "pending" so it can go through
+   Approve/Decline again — e.g. a decline made in error, or an approval
+   whose invite needs retrying. No dedicated "resend" exists (there's
+   no separate email-sending mechanism outside inviteUserByEmail
+   itself) — resetting and re-approving reuses the exact same path a
+   first-time approval takes. */
+export async function resetAccessRequest(id) {
+  const client = requireSupabase();
+  const { error } = await client
+    .from("access_requests")
+    .update({ status: "pending", decided_at: null })
     .eq("id", id);
   if (error) throw error;
 }

@@ -158,15 +158,63 @@ the two pieces that need an actual deploy. Migration
 `0003_access_requests.sql` has been run against the real Supabase project.
 Michael confirmed: submitting a request via `/request-access`, the admin
 "Requests" tab reading pending requests (RLS policy scoped to Michael's
-email), and Decline updating status — all good. **Still unverified** —
-both depend on Netlify Functions, which don't run under plain `npm run
-dev` and only work once actually deployed: Approve (`invite-user.js`,
-sends the real account invite) and the Slack alert on new requests
-(`notify-access-request.js`). Slack webhook URL is already set as a
-Netlify env var (`SLACK_WEBHOOK_URL`, scoped to Functions). Confirm both
-once Netlify deploys resume on 9/23 (or sooner on an upgrade) — this is
-the main reason this feature is still sitting uncommitted/unpushed
-locally.
+email), and Decline updating status — all good.
+
+**Live-deploy verification (2026-09-28):** the real push landed
+(commit `9b0d8c6`) and the Slack alert (`notify-access-request.js`) is
+**confirmed working in production** — a real access request (referred
+by Brian) triggered a clean Slack message with name, email, company,
+and referral source. **Still to verify:** Approve (`invite-user.js`,
+sends the real account invite) — test with a real, checkable email
+next.
+
+**Bug found + fixed during that first Approve test (2026-09-28):** the
+invite email arrived but linked to `localhost:3000` instead of the
+live site — Supabase's dashboard **Site URL** was never updated from
+its local-dev default. Fixed two ways: (1) Michael updated Site URL and
+Redirect URLs in Supabase to `https://inputlistmanager.com`; (2)
+`invite-user.js` now also passes an explicit `redirectTo` on the
+`inviteUserByEmail` call, hardcoded to the production URL, so this
+particular flow no longer depends on that dashboard setting staying
+correct. Not yet re-tested with a fresh invite.
+
+**Related gap found in the same conversation: no way to undo a
+decision.** Once a request was Approved or Declined, there was no UI
+to reconsider it — relevant both for "declined by mistake" and for
+"approved, but the invite needs retrying" (exactly the localhost bug
+above). **Built:** a "↺ Reset to pending" button on any decided request
+(`resetAccessRequest()` in `accessRequests.js`, clears status back to
+pending) — puts it back through the normal Approve/Decline flow,
+reusing all existing logic rather than a separate resend mechanism.
+**Deliberately not built:** relaxing the public form's one-request-per-
+email limit so a declined person could resubmit themselves — the
+admin-side reset covers the real need (Michael can reconsider an
+existing row himself) without opening the form back up to repeat/spam
+submissions.
+
+**Appeal path resolved (2026-09-28):** Michael raised the follow-up
+question — how does someone appeal a decline if they can't resubmit?
+Resolved without any new submission mechanism: since declines are
+already handled personally (not automated), the appeal channel is
+just "email Michael directly," and he already has Reset-to-pending to
+act on it. The duplicate-email error message (shown on any repeat
+submission, regardless of the prior row's actual status — deliberately
+doesn't reveal pending/approved/declined to whoever's asking) now says:
+"You've already submitted a request with this email. If it's been a
+while or your situation has changed, feel free to reach out directly at
+support@kickandsnare.llc and we'll take another look." Reuses the same
+contact address already on the Privacy Notice. No RLS/policy changes —
+copy only.
+
+**Open question, not yet answered:** does calling
+`inviteUserByEmail` a second time for an email that already has an
+unconfirmed auth user (from the broken first attempt) actually resend
+a fresh invite, or error as "already registered"? The existing code
+treats that error as a soft-success (marks the row approved without
+confirming an email actually went out) — if reset-and-reapprove hits
+that path, the fix is either deleting the stray unconfirmed user in
+Supabase's dashboard first, or building a real resend using
+`admin.generateLink`. Untested as of this note.
 
 **Decided (2026-09-17):** feature-tiering is premature — we don't yet
 know which features are actually worth paying for, and won't until

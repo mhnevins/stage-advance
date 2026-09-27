@@ -15,6 +15,11 @@ import { createClient } from "@supabase/supabase-js";
 
 const SUPABASE_URL = "https://wtarcntxmlkiutxansyo.supabase.co"; // not sensitive — same URL already public in the client bundle
 const ADMIN_EMAIL = "me@michaelnevins.com";
+// Explicit, not left to Supabase's dashboard "Site URL" setting — that
+// setting still needs to be correct for other auth emails, but this
+// invite link no longer depends on it matching (2026-09-28: it didn't,
+// and invites redirected to localhost).
+const SITE_URL = "https://inputlistmanager.com";
 
 export default async (req) => {
   if (req.method !== "POST") {
@@ -50,7 +55,7 @@ export default async (req) => {
       return new Response(JSON.stringify({ error: "Not authorized." }), { status: 403 });
     }
 
-    const { error: inviteErr } = await admin.auth.admin.inviteUserByEmail(email);
+    const { error: inviteErr } = await admin.auth.admin.inviteUserByEmail(email, { redirectTo: SITE_URL });
     if (inviteErr) throw inviteErr;
 
     return new Response(JSON.stringify({ success: true }), {

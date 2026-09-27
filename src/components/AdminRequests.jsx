@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { listAccessRequests, decideAccessRequest, accessRequestsToCsv, SOURCE_OPTIONS } from "../lib/accessRequests";
+import { listAccessRequests, decideAccessRequest, resetAccessRequest, accessRequestsToCsv, SOURCE_OPTIONS } from "../lib/accessRequests";
 
 const SOURCE_LABEL = Object.fromEntries(SOURCE_OPTIONS.map((o) => [o.value, o.label]));
 
@@ -21,6 +21,19 @@ export default function AdminRequests() {
       load();
     } catch (e) {
       setErr(e.message || "That didn't work — please try again.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const reset = async (id) => {
+    setBusyId(id);
+    setErr("");
+    try {
+      await resetAccessRequest(id);
+      load();
+    } catch (e) {
+      setErr(e.message || "Couldn't reset that request — please try again.");
     } finally {
       setBusyId(null);
     }
@@ -73,8 +86,14 @@ export default function AdminRequests() {
           </button>
         </div>
       ) : (
-        <div className="sa-sub" style={{ marginTop: 10 }}>
-          {r.status === "approved" ? "Approved" : "Declined"} {r.decided_at && new Date(r.decided_at).toLocaleString()}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
+          <div className="sa-sub">
+            {r.status === "approved" ? "Approved" : "Declined"} {r.decided_at && new Date(r.decided_at).toLocaleString()}
+          </div>
+          <button className="sa-btn ghost" style={{ fontSize: 12 }} disabled={busyId === r.id}
+            onClick={() => reset(r.id)} title="Move back to pending so you can Approve/Decline it again">
+            {busyId === r.id ? "Working…" : "↺ Reset to pending"}
+          </button>
         </div>
       )}
     </div>
