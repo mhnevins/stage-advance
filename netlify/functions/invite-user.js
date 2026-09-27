@@ -55,19 +55,10 @@ export default async (req) => {
       return new Response(JSON.stringify({ error: "Not authorized." }), { status: 403 });
     }
 
-    // Temporary diagnostic trail (2026-09-28) — this flow has failed
-    // silently twice already on wrong assumptions, so every attempt now
-    // reports exactly what it saw and did at each step, returned to the
-    // caller regardless of outcome. Strip this out once the invite path
-    // is confirmed reliable.
-    const debug = { step: "initial-invite" };
-
     const invite = async () => admin.auth.admin.inviteUserByEmail(email, { redirectTo: SITE_URL });
     let { error: inviteErr } = await invite();
-    debug.initialInviteError = inviteErr?.message || null;
 
     if (inviteErr && /already.*(registered|exists)/i.test(inviteErr.message || "")) {
-      debug.step = "duplicate-detected";
       // The address already has an auth user — could be someone who
       // genuinely already has a working account (fine, nothing to do),
       // or a stale invite stuck from an earlier attempt that never got
@@ -77,65 +68,46 @@ export default async (req) => {
       // so look the user up and decide instead of guessing from the
       // error text alone.
       //
-      // NOT using last_sign_in_at (tried, confirmed wrong 2026-09-27):
-      // Supabase sets last_sign_in_at the moment the invite link's OTP
-      // is verified server-side — which happens BEFORE the browser
-      // follows redirectTo. So a person who clicked a broken-redirect
-      // link (like the localhost bug) gets last_sign_in_at set even
-      // though they never actually reached the app. That's exactly what
-      // happened to this project's own test account, which is why every
-      // retry since then silently skipped sending anything.
-      //
-      // Using presence of a `profiles` row instead: ensureMyProfile()
-      // (src/lib/profile.js) only runs once useAuth.js sees a real
-      // session inside the actual running app (src/lib/useAuth.js) —
-      // so a profiles row means the app itself genuinely loaded for
-      // this user at least once, not just that a link was clicked.
+      // Checking for a `profiles` row, not last_sign_in_at: Supabase
+      // sets last_sign_in_at the moment an invite link's OTP is verified
+      // server-side — which happens BEFORE the browser follows
+      // redirectTo. So someone who clicked a broken-redirect link gets
+      // last_sign_in_at set even though they never actually reached the
+      // app. ensureMyProfile() (src/lib/profile.js) only runs once
+      // useAuth.js sees a real session inside the actual running app
+      // (src/lib/useAuth.js), so a profiles row means the app genuinely
+      // loaded for this user at least once.
       // listUsers() returns one page (no pagination handled) — fine at
       // this project's current user count, revisit if that changes.
       const { data: usersPage, error: listErr } = await admin.auth.admin.listUsers();
-      debug.listUsersError = listErr?.message || null;
-      debug.totalUsersOnPage = usersPage?.users?.length ?? null;
       if (listErr) throw inviteErr;
       const existing = usersPage?.users?.find((u) => u.email?.toLowerCase() === email.toLowerCase());
-      debug.existingFound = Boolean(existing);
+
+      let hasProfile = false;
       if (existing) {
-        debug.existing = {
-          id: existing.id,
-          email: existing.email,
-          created_at: existing.created_at,
-          last_sign_in_at: existing.last_sign_in_at,
-          email_confirmed_at: existing.email_confirmed_at,
-        };
-        const { data: profileRow, error: profileErr } = await admin
+        const { data: profileRow } = await admin
           .from("profiles")
           .select("id")
           .eq("id", existing.id)
           .maybeSingle();
-        debug.profileLookupError = profileErr?.message || null;
-        debug.hasProfile = Boolean(profileRow);
+        hasProfile = Boolean(profileRow);
       }
 
-      if (existing && !debug.hasProfile) {
-        debug.step = "deleting-stale-user";
+      if (existing && !hasProfile) {
         const { error: deleteErr } = await admin.auth.admin.deleteUser(existing.id);
-        debug.deleteError = deleteErr?.message || null;
         if (deleteErr) throw inviteErr;
-        debug.step = "retry-invite";
         ({ error: inviteErr } = await invite());
-        debug.retryInviteError = inviteErr?.message || null;
       } else if (existing) {
-        debug.step = "treated-as-real-account";
         inviteErr = null; // has an actual profiles row — genuinely uses the app, nothing to send
       }
     }
     if (inviteErr) {
-      return new Response(JSON.stringify({ error: inviteErr.message, debug }), {
+      return new Response(JSON.stringify({ error: inviteErr.message }), {
         status: 502, headers: { "Content-Type": "application/json" },
       });
     }
 
-    return new Response(JSON.stringify({ success: true, debug }), {
+    return new Response(JSON.stringify({ success: true }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });

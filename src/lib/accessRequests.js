@@ -67,12 +67,8 @@ export async function listAccessRequests() {
   return data || [];
 }
 
-// Returns the invite function's debug trail on approve (null on
-// decline) — temporary, so the caller can surface exactly what
-// happened rather than just success/fail. See invite-user.js.
 export async function decideAccessRequest(id, decision, email) {
   const client = requireSupabase();
-  let debug = null;
 
   if (decision === "approve") {
     const { data: { session } } = await client.auth.getSession();
@@ -82,16 +78,13 @@ export async function decideAccessRequest(id, decision, email) {
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
       body: JSON.stringify({ email }),
     });
-    const body = await res.json().catch(() => ({}));
-    debug = body.debug || null;
     if (!res.ok) {
       // invite-user.js already resolves the "already registered" case
       // itself (distinguishing a real existing account from a stale,
       // never-completed invite) — anything it still returns as an error
       // here is a genuine failure, not something to paper over.
-      const err = new Error(body.error || "Couldn't send the invite.");
-      err.debug = debug;
-      throw err;
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || "Couldn't send the invite.");
     }
   }
 
@@ -100,7 +93,6 @@ export async function decideAccessRequest(id, decision, email) {
     .update({ status: decision === "approve" ? "approved" : "declined", decided_at: new Date().toISOString() })
     .eq("id", id);
   if (error) throw error;
-  return debug;
 }
 
 /* Sends a decided request back to "pending" so it can go through

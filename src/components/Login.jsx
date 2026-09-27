@@ -55,7 +55,8 @@ export default function Login({ onSignIn }) {
             <div style={{ marginTop: 12 }}>
               <a href="/request-access" className="sa-sub" style={{ fontSize: 12 }}>Don't have access yet? Request access</a>
             </div>
-            <div style={{ marginTop: 6 }}>
+            <div style={{ marginTop: 6, display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
+              <a href="/guide" target="_blank" rel="noopener noreferrer" className="sa-sub" style={{ fontSize: 12 }}>New here? Read the guide</a>
               <a href="/privacy" className="sa-sub" style={{ fontSize: 12 }}>Privacy Notice</a>
             </div>
           </form>

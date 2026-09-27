@@ -10,6 +10,7 @@ import { exportMyData, deleteMyAccount } from "./lib/account";
 import * as submissionsApi from "./lib/submissions";
 import Login from "./components/Login";
 import PrivacyNotice from "./components/PrivacyNotice";
+import Guide from "./components/Guide";
 import RequestAccess from "./components/RequestAccess";
 import AdminRequests from "./components/AdminRequests";
 import Landing from "./components/Landing";
@@ -422,6 +423,7 @@ const submissionToShow = (sub) => {
 const FORM_SLUG_RE = /^\/form\/([a-zA-Z0-9-]+)\/?$/;
 const LEGACY_FORM_RE = /^\/band-form\/?$/;
 const PRIVACY_RE = /^\/privacy\/?$/;
+const GUIDE_RE = /^\/guide\/?$/;
 const REQUEST_ACCESS_RE = /^\/request-access\/?$/;
 const LOGIN_RE = /^\/login\/?$/;
 // Must match the admin email hardcoded in
@@ -435,6 +437,7 @@ export default function StageAdvance() {
   const formSlug = formMatch ? formMatch[1] : null;
   const legacyForm = LEGACY_FORM_RE.test(window.location.pathname);
   const isPrivacyRoute = PRIVACY_RE.test(window.location.pathname);
+  const isGuideRoute = GUIDE_RE.test(window.location.pathname);
   const isRequestAccessRoute = REQUEST_ACCESS_RE.test(window.location.pathname);
   const isLoginRoute = LOGIN_RE.test(window.location.pathname);
   const standalone = Boolean(formSlug) || legacyForm;
@@ -1740,6 +1743,13 @@ ${gearSection}
           </div>
         </div>
       ))}
+
+      <div className="sa-sub" style={{ textAlign: "center", marginTop: 10, paddingTop: 16, borderTop: "1px dashed #2c2f37" }}>
+        Free to use. If StageAdvance saves you time,{" "}
+        <a href="https://ko-fi.com/stageadvance" target="_blank" rel="noopener noreferrer" style={{ color: "#E8B93E" }}>
+          support us on Ko-fi
+        </a>.
+      </div>
     </div>
   );
 
@@ -2281,6 +2291,17 @@ ${gearSection}
             )}
           </div>
         ))}
+      </div>
+
+      <div className="sa-card" style={{ textAlign: "center" }}>
+        <h2 className="sa-h2">Need a refresher?</h2>
+        <div className="sa-sub" style={{ marginBottom: 14 }}>
+          The full guide covers the Planner, input/output lists, Inventory, the Band Form, and more.
+        </div>
+        <a href="/guide" target="_blank" rel="noopener noreferrer"
+          className="sa-btn" style={{ padding: "10px 22px", fontSize: 14, textDecoration: "none", display: "inline-block" }}>
+          📖 Open the guide
+        </a>
       </div>
 
       <div className="sa-card" style={{ textAlign: "center" }}>
@@ -3074,7 +3095,7 @@ ${gearSection}
             <div className="sa-logo">Stage<span>Advance</span></div>
             <div className="sa-sub">input lists · output lists · mic pulls · stand counts — before you load the van</div>
           </div>
-          {!isPrivacyRoute && !isRequestAccessRoute && !isLoginRoute && !standalone && user && (
+          {!isPrivacyRoute && !isGuideRoute && !isRequestAccessRoute && !isLoginRoute && !standalone && user && (
             <div className="sa-tabs no-print" style={{ alignItems: "center" }}>
               <div className="sa-sub" style={{ marginRight: 4 }}>Signed in as {user.email}</div>
               <button className={`sa-tab${mode === "plan" ? " on" : ""}`} onClick={() => setMode("plan")}>Planner</button>
@@ -3084,8 +3105,8 @@ ${gearSection}
               {isAdmin && (
                 <button className={`sa-tab${mode === "admin-requests" ? " on" : ""}`} onClick={() => setMode("admin-requests")}>Requests</button>
               )}
-              <a className="sa-tab" href="https://ko-fi.com/stageadvance" target="_blank" rel="noopener noreferrer"
-                title="Support StageAdvance on Ko-fi">☕ Support</a>
+              <a className="sa-tab" href="/guide" target="_blank" rel="noopener noreferrer"
+                title="How to use StageAdvance (opens in a new tab)">Guide</a>
               <button className="sa-tab" onClick={signOut}>Sign out</button>
             </div>
           )}
@@ -3093,6 +3114,8 @@ ${gearSection}
 
         {isPrivacyRoute ? (
           <PrivacyNotice />
+        ) : isGuideRoute ? (
+          <Guide />
         ) : isRequestAccessRoute ? (
           <RequestAccess />
         ) : isLoginRoute && !user ? (

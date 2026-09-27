@@ -7,7 +7,6 @@ export default function AdminRequests() {
   const [rows, setRows] = useState(null);
   const [err, setErr] = useState("");
   const [busyId, setBusyId] = useState(null);
-  const [debugInfo, setDebugInfo] = useState(null); // temporary — see invite-user.js
 
   const load = () => {
     listAccessRequests().then(setRows).catch((e) => setErr(e.message || "Couldn't load requests."));
@@ -17,14 +16,11 @@ export default function AdminRequests() {
   const decide = async (id, decision, email) => {
     setBusyId(id);
     setErr("");
-    setDebugInfo(null);
     try {
-      const debug = await decideAccessRequest(id, decision, email);
-      if (debug) setDebugInfo(debug);
+      await decideAccessRequest(id, decision, email);
       load();
     } catch (e) {
       setErr(e.message || "That didn't work — please try again.");
-      if (e.debug) setDebugInfo(e.debug);
     } finally {
       setBusyId(null);
     }
@@ -110,14 +106,6 @@ export default function AdminRequests() {
         <button className="sa-btn" onClick={exportCsv} disabled={!rows.length}>Export CSV</button>
       </div>
       {err && <div className="sa-shortbanner" style={{ margin: "10px 0" }}>{err}</div>}
-      {debugInfo && (
-        <pre className="sa-sub" style={{
-          margin: "10px 0", padding: 12, background: "rgba(0,0,0,0.25)",
-          borderRadius: 8, fontSize: 12, whiteSpace: "pre-wrap", wordBreak: "break-word",
-        }}>
-          {JSON.stringify(debugInfo, null, 2)}
-        </pre>
-      )}
 
       <h3 className="sa-h2" style={{ fontSize: 16, marginTop: 20 }}>Pending ({pending.length})</h3>
       {pending.length ? pending.map(row) : <div className="sa-sub">Nothing waiting on you right now.</div>}
