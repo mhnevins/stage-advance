@@ -222,8 +222,21 @@ Supabase cleanup needed. `decideAccessRequest`'s client-side string
 matching was removed entirely; the server now resolves this properly,
 so anything it still returns as an error is a real failure. One noted
 limitation: `listUsers()` isn't paginated, fine at this project's
-current scale, worth revisiting if the user count grows a lot. Not yet
-re-tested against the live stuck request.
+current scale, worth revisiting if the user count grows a lot.
+
+**That fix had its own bug (2026-09-28, found immediately on retest):**
+Michael reset + re-approved and got a clean "Approved" with no error —
+but no invite email ever arrived. Root cause: the stale-vs-real check
+used `email_confirmed_at`, but `inviteUserByEmail` sets that the moment
+an invite is created (Supabase vouching for the address, not the
+person completing anything) — so it's set on every invited user
+immediately, stale or not, making it useless for telling them apart.
+The code silently concluded "already has a real account" and sent
+nothing. **Fixed:** check `last_sign_in_at` instead — genuinely null
+for anyone who's never completed a working link, which is the actual
+condition that matters. (Ruled out first: Supabase's email rate limit,
+confirmed at 30/hour in the dashboard — nowhere close to being hit.)
+Not yet re-tested.
 
 **Decided (2026-09-17):** feature-tiering is premature — we don't yet
 know which features are actually worth paying for, and won't until

@@ -63,21 +63,26 @@ export default async (req) => {
       // genuinely already has a working account (fine, nothing to do),
       // or a stale invite stuck from an earlier attempt that never got
       // completed (e.g. the localhost-redirect bug from 2026-09-28,
-      // which left invited-but-unconfirmed users behind). Only the
-      // second case should actually block a fresh invite, so look the
-      // user up and decide instead of guessing from the error text alone.
+      // which left invited users behind who never actually signed in).
+      // Only the second case should actually block a fresh invite, so
+      // look the user up and decide instead of guessing from the error
+      // text alone. Checking last_sign_in_at, not email_confirmed_at —
+      // inviteUserByEmail marks the email confirmed immediately (that's
+      // Supabase vouching for the address, not the person completing
+      // anything), so that flag can't tell a stale invite apart from a
+      // real account. Never having signed in actually can.
       // listUsers() returns one page (no pagination handled) — fine at
       // this project's current user count, revisit if that changes.
       const { data: usersPage, error: listErr } = await admin.auth.admin.listUsers();
       if (listErr) throw inviteErr;
       const existing = usersPage?.users?.find((u) => u.email?.toLowerCase() === email.toLowerCase());
 
-      if (existing && !existing.email_confirmed_at) {
+      if (existing && !existing.last_sign_in_at) {
         const { error: deleteErr } = await admin.auth.admin.deleteUser(existing.id);
         if (deleteErr) throw inviteErr;
         ({ error: inviteErr } = await invite());
       } else if (existing) {
-        inviteErr = null; // already has a real, confirmed account — nothing to send
+        inviteErr = null; // has actually signed in before — real account, nothing to send
       }
     }
     if (inviteErr) throw inviteErr;
