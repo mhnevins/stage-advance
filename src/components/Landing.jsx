@@ -1,4 +1,5 @@
 import ScreenshotPlaceholder from "./ScreenshotPlaceholder";
+import DeviceShowcase from "./DeviceShowcase";
 
 const FEATURES = [
   {
@@ -15,11 +16,23 @@ const FEATURES = [
   },
   {
     title: "Print-ready in one click",
-    body: "Generate a clean input list, mic pull sheet, and stand count for your crew — formatted for the truck, not for a screen.",
+    body: "Generate a clean input list, output list, and mic pull for your crew — the show header on every page and the gear pull on its own last page.",
   },
   {
     title: "Built for the load-in",
     body: "Works on your phone at the venue as easily as it does on your laptop at home.",
+  },
+  {
+    title: "Output lists, too",
+    body: "Plan your mains and monitors as well: stereo-linked pairs that move together, your own speaker and amp inventory, and patch destinations like Local, AES, or Dante.",
+  },
+  {
+    title: "Built for speed",
+    body: "Quick-add chips, one-click duplicate, and keyboard shortcuts keep big shows quick to build.",
+  },
+  {
+    title: "Fits your spreadsheet workflow",
+    body: "Export your input and output lists to CSV or Excel whenever you need them.",
   },
   {
     title: "Your data stays yours",
@@ -30,13 +43,22 @@ const FEATURES = [
 const PERSONAS = [
   { title: "Freelance & gig engineers", body: "A different band and venue every week — no time to rebuild an input list from scratch each time." },
   { title: "Theatre & musical sound designers", body: "A live band in the pit and a cast to wrangle — quickly onboard incoming bands and multi-instrument players." },
-  { title: "Small venues & house engineers", body: "One gear locker, reused show after show, without a spreadsheet that drifts out of date." },
+  { title: "Small venues & house engineers", body: "One gear inventory, reused show after show, without a spreadsheet that drifts out of date." },
 ];
 
 const STEPS = [
-  { n: "1", title: "Build your locker", body: "Add the mics and DIs you own, once." },
-  { n: "2", title: "Send your Band Form link", body: "Bands tell you what they're bringing before they even load in." },
-  { n: "3", title: "Print your sheets", body: "Input list, mic pull, and stand count — generated automatically." },
+  { n: "1", title: "Build your inventory", body: "Add the mics, DIs, and speakers you own, once." },
+  { n: "2", title: "Plan your show", body: "Tap in your inputs and outputs, assign stage boxes and positions, and see your gear pull and any shortages as you build." },
+  { n: "3", title: "Print your sheets", body: "Input list, output list, mic pull, and stand count — generated automatically." },
+];
+
+// Unattributed by design (Michael, 2026-09-25) — quotes from pre-launch
+// users, no names. Add new ones here; each renders as its own card.
+const TESTIMONIALS = [
+  "I have to say that I love it. I used it for a musical theatre show that I was sound engineering, where I had 28 cast plus a band and was great! I love the fact that you can add your own mics so you quickly see if you need to hire anything or not.",
+  "Definitely love it and I would love being able to use it in the future.",
+  "I’m sound designing a musical for our university, and I loved the idea as I’m collaborating with several school departments. One thing that I really love is the ability to collect info from the bands!",
+  "Hey! This is really cool man.",
 ];
 
 export default function Landing() {
@@ -45,12 +67,12 @@ export default function Landing() {
       {/* ——— Hero ——— */}
       <div style={{ textAlign: "center", padding: "40px 12px 20px" }}>
         <h1 style={{ fontSize: "clamp(24px, 4vw, 38px)", lineHeight: 1.2, margin: "0 0 14px", fontWeight: 800 }}>
-          Input lists and mic pulls,<br />without the spreadsheet.
+          Input lists, output lists and mic pulls,<br />without the spreadsheet.
         </h1>
         <p className="sa-sub" style={{ fontSize: 15, maxWidth: 560, margin: "0 auto 24px" }}>
           StageAdvance helps live sound engineers plan shows fast: build your gear
-          locker once, send bands a simple questionnaire, and generate crew-ready
-          input lists, mic pulls, and stand counts automatically.
+          inventory once, send bands a simple questionnaire, and generate crew-ready
+          input lists, output lists, mic pulls, and stand counts automatically.
         </p>
         <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
           <a href="/request-access" className="sa-btn primary" style={{ padding: "10px 22px", fontSize: 14, textDecoration: "none" }}>
@@ -63,7 +85,7 @@ export default function Landing() {
       </div>
 
       <div style={{ margin: "24px 0 48px" }}>
-        <ScreenshotPlaceholder label="Planner / input list view" aspect="16/9" />
+        <ScreenshotPlaceholder label="Planner / input list view" src="/screenshots/input-list.png" alt="The StageAdvance input list: color-coded channels with mic, stand, 48V, stage position, and stage box assignments" />
       </div>
 
       {/* ——— Who it's for ——— */}
@@ -78,9 +100,6 @@ export default function Landing() {
               <div className="sa-sub" style={{ fontSize: 13 }}>{p.body}</div>
             </div>
           ))}
-        </div>
-        <div className="sa-sub" style={{ textAlign: "center", fontSize: 12, marginTop: 16 }}>
-          Not built for stadium tours with a full production crew — there are already great tools for that.
         </div>
       </div>
 
@@ -97,6 +116,25 @@ export default function Landing() {
         </div>
       </div>
 
+      {/* ——— Cross-device ——— */}
+      <div style={{ margin: "56px 0" }}>
+        <h2 className="sa-h2" style={{ textAlign: "center", fontSize: 16 }}>Works wherever the show is</h2>
+        <p className="sa-sub" style={{ fontSize: 13, maxWidth: 560, margin: "0 auto 20px", textAlign: "center" }}>
+          Same planner on your laptop at home, a tablet backstage, or your phone at the venue.
+        </p>
+        <DeviceShowcase />
+      </div>
+
+      {/* ——— Outputs showcase ——— */}
+      <div style={{ margin: "56px 0" }}>
+        <h2 className="sa-h2" style={{ textAlign: "center", fontSize: 16 }}>Plan your outputs the same way</h2>
+        <p className="sa-sub" style={{ fontSize: 13, maxWidth: 560, margin: "0 auto 20px", textAlign: "center" }}>
+          Same quick-add, duplicate, and reorder moves as the input list. Link a stereo pair
+          and it travels together, and route each output to a Local, AES, or Dante patch.
+        </p>
+        <ScreenshotPlaceholder label="Output list with a stereo-linked pair and quick-add chips" src="/screenshots/outputs.png" alt="The StageAdvance output list: quick-add chips, two stereo-linked pairs, endpoints from your inventory, and color-coded AES, Dante, and monitor patch destinations" />
+      </div>
+
       {/* ——— How it works ——— */}
       <div style={{ margin: "56px 0" }}>
         <h2 className="sa-h2" style={{ textAlign: "center", fontSize: 16 }}>How it works</h2>
@@ -110,17 +148,21 @@ export default function Landing() {
           ))}
         </div>
         <div style={{ margin: "28px 0 0" }}>
-          <ScreenshotPlaceholder label="Print-ready mic pull / stand count sheet" aspect="16/9" />
+          <ScreenshotPlaceholder label="Print-ready crew sheet" src="/screenshots/print-crew-sheet.png" alt="A printed StageAdvance crew sheet: show header, color-coded input list with positions and stage box labels" />
         </div>
       </div>
 
-      {/* ——— Testimonial (placeholder — do not ship without a real, approved quote) ——— */}
+      {/* ——— Testimonials (unattributed; edit TESTIMONIALS above) ——— */}
       <div style={{ margin: "56px 0" }}>
-        <div className="sa-card" style={{ padding: 28, textAlign: "center", maxWidth: 640, margin: "0 auto" }}>
-          <div style={{ fontSize: 15, fontStyle: "italic", marginBottom: 10 }}>
-            "Placeholder — swap in a real, beta-tester-approved quote before this page goes live."
-          </div>
-          <div className="sa-sub" style={{ fontSize: 12 }}>— Real testimonial pending approval</div>
+        <h2 className="sa-h2" style={{ textAlign: "center", fontSize: 16 }}>
+          What our pre-launch users are saying
+        </h2>
+        <div style={{ display: "grid", gap: 14, maxWidth: 640, margin: "20px auto 0" }}>
+          {TESTIMONIALS.map((quote, i) => (
+            <div key={i} className="sa-card" style={{ padding: 24, textAlign: "center" }}>
+              <div style={{ fontSize: 15, fontStyle: "italic", lineHeight: 1.5 }}>“{quote}”</div>
+            </div>
+          ))}
         </div>
       </div>
 

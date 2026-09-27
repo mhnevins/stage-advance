@@ -1,6 +1,17 @@
-// Stand-in for a real screenshot until the app is deployed and real ones
-// can be captured. Search for ScreenshotPlaceholder when swapping them in.
-export default function ScreenshotPlaceholder({ label, aspect = "16/10" }) {
+// Renders a real screenshot when `src` is given (files live in
+// public/screenshots/), otherwise a dashed stand-in box. Search for
+// ScreenshotPlaceholder usages without a `src` to find what's still missing.
+export default function ScreenshotPlaceholder({ label, aspect = "16/10", src, alt }) {
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt={alt || label}
+        loading="lazy"
+        style={{ width: "100%", height: "auto", display: "block", borderRadius: 10, border: "1px solid #2c2f37" }}
+      />
+    );
+  }
   return (
     <div
       style={{

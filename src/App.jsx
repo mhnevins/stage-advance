@@ -3,6 +3,7 @@ import Papa from "papaparse";
 import { storage } from "./lib/storage";
 import { useAuth } from "./lib/useAuth";
 import { listMyInventory, addInventoryItem, updateInventoryItem, removeInventoryItem } from "./lib/inventory";
+import { listMyEndpoints, addEndpointItem, updateEndpointItem, removeEndpointItem } from "./lib/endpoints";
 import { lookupMicLibrary, cacheMicLibraryEntry, fetchAiTagsForMic } from "./lib/micLibrary";
 import { resolveOwnerBySlug, updateMyProfile } from "./lib/profile";
 import { exportMyData, deleteMyAccount } from "./lib/account";
@@ -40,6 +41,7 @@ const GROUPS = {
 
 const EXTRA_OPTIONS = ["DI (passive)", "DI (active)", "Stereo DI", "Wireless HH", "Headset/Lav"];
 const RENTAL = "__rental";
+const ENDPOINT_RENTAL = "__endpoint_other";
 
 const CONDENSERS = ["e614 (SDC)", "sE7 (SDC)", "Roswell MiniK47", "AT2020"];
 const needsPhantom = (mic) =>
@@ -54,6 +56,16 @@ const STAND_OPTIONS = ["Tall boom", "Short boom", "Straight", "Drum clamp", "Des
 const STAGE_POSITIONS = ["USL", "USC", "USR", "SL", "C", "SR", "DSL", "DSC", "DSR"];
 const POSITION_OTHER = "__other_position";
 
+/* Keyboard shortcuts: Cmd/Ctrl+D is unavoidably reserved by every major
+   browser for bookmarking, and Ctrl+Up/Down is reserved by macOS itself
+   for Mission Control — neither can be intercepted from a web page.
+   Using a bare "D" (scoped to skip actual text entry) and Alt/Option+Up/
+   Down instead, which aren't reserved and mirror how code editors
+   already do "move line up/down". */
+const isMac = typeof navigator !== "undefined" && /Mac|iPod|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "");
+const ALT_KEY_LABEL = isMac ? "⌥" : "Alt+";
+const isTextEntryTarget = (el) => Boolean(el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA"));
+
 /* ——— Mic/DI recognition (Phase 3): fixed vocabulary shared with
    supabase/migrations/0002_mic_library.sql and netlify/functions/lookup-mic.js ——— */
 const MIC_TYPE_OPTIONS = ["dynamic", "condenser", "ribbon", "di-active", "di-passive"];
@@ -62,6 +74,14 @@ const USE_CASE_OPTIONS = [
   "bass-di", "bass-amp", "guitar-amp", "acoustic-guitar", "keys", "piano",
   "organ", "strings", "horn", "lead-vocal", "backing-vocal", "wireless",
   "playback", "di-passive", "di-active",
+];
+
+/* ——— Outputs: endpoint locker. Manually tagged only — no AI-lookup
+   layer here, unlike mics (Michael, 2026-09-23: tagging is useful,
+   auto-suggesting is not needed). Easy to extend this list later. ——— */
+const ENDPOINT_TYPE_OPTIONS = [
+  "Powered Speaker", "Passive Speaker", "Powered Wedge", "Passive Wedge",
+  "Wedge monitor", "IEM transmitter", "Line array", "Point source", "Subwoofer", "Power amp", "Other",
 ];
 
 /* ——— Phase 4a: parse one line of a pasted mic list into {label, qty}.
@@ -130,7 +150,7 @@ const COLOR_SWATCHES = [
   "#6B6BC9", "#4E8FD1", "#4CC3C9", "#5FA85C", "#8FBF4C", "#8A8F98",
 ];
 
-function ColorSwatchPicker({ value, onChange, onClose }) {
+function ColorSwatchPicker({ value, onChange, onClose, onReset }) {
   return (
     <div onClick={(e) => e.stopPropagation()}>
       <div className="sa-swatchgrid">
@@ -144,6 +164,12 @@ function ColorSwatchPicker({ value, onChange, onClose }) {
         <input type="color" value={value} onChange={(e) => onChange(e.target.value)} />
         Custom…
       </label>
+      {onReset && (
+        <button type="button" className="sa-btn ghost" style={{ marginTop: 8, fontSize: 12, padding: "4px 8px" }}
+          onClick={() => { onReset(); if (onClose) onClose(); }}>
+          Reset to group color
+        </button>
+      )}
     </div>
   );
 }
@@ -259,7 +285,7 @@ const uid = () => Math.random().toString(36).slice(2, 9);
 
 const newShow = () => ({
   id: uid(), band: "", date: "", venue: "", contact: "",
-  monitors: "", notes: "", channels: [], boxes: [], updated: Date.now(),
+  monitors: "", notes: "", channels: [], boxes: [], outputs: [], outputBoxes: [], updated: Date.now(),
 });
 
 const blankMember = () => ({ id: uid(), name: "", instrument: "Electric guitar", other: "", sings: "none" });
@@ -274,6 +300,21 @@ const blankForm = () => ({
 
 const STORAGE_KEY = "stage-advance:shows";
 const GROUP_COLORS_KEY = "stage-advance:group-colors";
+const OUTPUT_CHIPS_KEY = "stage-advance:output-chips";
+
+/* Quick-add chips for the Outputs section — the default set from Brian's
+   review (2026-09-25). A `stereo` chip adds an L + R pair, stereo-linked
+   (the link can still be toggled off per row). Users can add their own
+   chips on top of these; custom ones are stored per account (kv_user),
+   defaults are fixed. */
+const DEFAULT_OUTPUT_CHIPS = [
+  { id: "default-main", name: "Main", stereo: true },
+  { id: "default-aux1", name: "Aux 1" },
+  { id: "default-aux2", name: "Aux 2" },
+  { id: "default-aux3", name: "Aux 3" },
+  { id: "default-aux4", name: "Aux 4" },
+];
+const outputChipLabel = (chip) => (chip.stereo ? `${chip.name} L/R` : chip.name);
 const GROUP_ORDER = Object.keys(GROUPS);
 
 const groupSort = (channels) =>
@@ -418,6 +459,7 @@ export default function StageAdvance() {
   const [rowLookupBusyId, setRowLookupBusyId] = useState(null);
   const [showPastePanel, setShowPastePanel] = useState(false);
   const [showBoxPanel, setShowBoxPanel] = useState(false);
+  const [showShortcutsPanel, setShowShortcutsPanel] = useState(false);
   const [pasteText, setPasteText] = useState("");
   const [importBusy, setImportBusy] = useState(false);
   const [importReview, setImportReview] = useState(null); // { items: [{label, qty, type, needs_phantom, use_cases, status, selected}] }
@@ -433,6 +475,20 @@ export default function StageAdvance() {
   const [openColorPickerId, setOpenColorPickerId] = useState(null);
   const [openGroupPickerFor, setOpenGroupPickerFor] = useState(null);
   const [overIdx, setOverIdx] = useState(null);
+  const [outputDragIdx, setOutputDragIdx] = useState(null);
+  const [outputOverIdx, setOutputOverIdx] = useState(null);
+  const [showOutputBoxPanel, setShowOutputBoxPanel] = useState(false);
+  const [customOutputChips, setCustomOutputChips] = useState([]); // [{ id, name, stereo }], per account
+  const [newChipName, setNewChipName] = useState("");
+  const [newChipStereo, setNewChipStereo] = useState(false);
+  const [endpointItems, setEndpointItems] = useState([]);
+  const [endpointErr, setEndpointErr] = useState("");
+  const [endpointLabelDraft, setEndpointLabelDraft] = useState("");
+  const [endpointQtyDraft, setEndpointQtyDraft] = useState("1");
+  const [endpointTypeDraft, setEndpointTypeDraft] = useState("");
+  const [showEndpointPastePanel, setShowEndpointPastePanel] = useState(false);
+  const [endpointPasteText, setEndpointPasteText] = useState("");
+  const [endpointImportReview, setEndpointImportReview] = useState(null); // { items: [{label, qty, type, status, selected}] }
   const [submissions, setSubmissions] = useState([]);
   const [form, setForm] = useState(blankForm());
   const [formDone, setFormDone] = useState(false);
@@ -442,6 +498,7 @@ export default function StageAdvance() {
   const [formOwnerStatus, setFormOwnerStatus] = useState(formSlug ? "loading" : "n/a");
   const saveTimer = useRef(null);
   const fileInputRef = useRef(null);
+  const endpointFileInputRef = useRef(null);
 
   const inventory = {};
   inventoryItems.forEach((i) => { inventory[i.label] = i.qty; });
@@ -490,6 +547,101 @@ export default function StageAdvance() {
     catch (e) { setInventoryErr("Couldn't remove that item — please try again."); loadInventory(); }
   };
 
+  /* ——— Endpoint locker: same shape as the mic locker above, minus the
+     AI-lookup step — endpoints are manually tagged, not auto-suggested. ——— */
+  const loadEndpoints = () => listMyEndpoints().then(setEndpointItems).catch(() => setEndpointItems([]));
+
+  const addEndpointRow = async (label, qty, type = null) => {
+    if (!label.trim()) return;
+    setEndpointErr("");
+    try {
+      const row = await addEndpointItem(label.trim(), qty, type || null);
+      setEndpointItems((prev) => [...prev, row].sort((a, b) => a.label.localeCompare(b.label)));
+    } catch (e) {
+      setEndpointErr(e.code === "23505"
+        ? `You already have "${label.trim()}" in your endpoints — edit its quantity instead.`
+        : "Couldn't add that item — please try again.");
+    }
+  };
+
+  const updateEndpointRow = async (id, patch) => {
+    setEndpointItems((prev) => prev.map((i) => (i.id === id ? { ...i, ...patch } : i)));
+    try { await updateEndpointItem(id, patch); }
+    catch (e) {
+      setEndpointErr(e.code === "23505"
+        ? "That name is already used by another item in your endpoints."
+        : "Couldn't save that change — please try again.");
+      loadEndpoints();
+    }
+  };
+
+  const removeEndpointRow = async (id) => {
+    setEndpointItems((prev) => prev.filter((i) => i.id !== id));
+    try { await removeEndpointItem(id); }
+    catch (e) { setEndpointErr("Couldn't remove that item — please try again."); loadEndpoints(); }
+  };
+
+  /* Bulk import (paste / CSV / XLSX) — same generous parsers the mic
+     locker uses (parseLockerPasteLine, parseCsvFile/parseXlsxFile,
+     extractCandidatesFromRows are all generic, not mic-specific), but
+     no recognition step: everything just goes to a review list with a
+     blank type to fill in, since there's no library/AI lookup here. */
+  const startEndpointPasteImport = () => {
+    const lines = endpointPasteText.split("\n").map(parseLockerPasteLine).filter(Boolean);
+    if (lines.length === 0) return;
+    buildEndpointImportReview(lines);
+  };
+
+  const handleEndpointFileImport = async (file) => {
+    setEndpointErr("");
+    try {
+      const isXlsx = /\.xlsx?$/i.test(file.name);
+      const rows = isXlsx ? await parseXlsxFile(file) : await parseCsvFile(file);
+      const candidates = extractCandidatesFromRows(rows);
+      if (candidates.length === 0) {
+        setEndpointErr("Couldn't find any endpoint rows in that file — check it has a label and (optionally) a quantity column.");
+        return;
+      }
+      buildEndpointImportReview(candidates);
+    } catch (e) {
+      setEndpointErr("Couldn't read that file — please check the format and try again.");
+    }
+  };
+
+  const buildEndpointImportReview = (rawCandidates) => {
+    const merged = new Map();
+    rawCandidates.forEach(({ label, qty }) => {
+      const key = label.toLowerCase();
+      const existing = merged.get(key);
+      if (existing) existing.qty += qty;
+      else merged.set(key, { label, qty });
+    });
+    const ownedLabels = new Set(endpointItems.map((i) => i.label.toLowerCase()));
+    const items = [...merged.values()].map((c) => ({
+      label: c.label, qty: c.qty, type: "",
+      status: ownedLabels.has(c.label.toLowerCase()) ? "duplicate" : "new",
+      selected: !ownedLabels.has(c.label.toLowerCase()),
+    }));
+    setEndpointImportReview({ items });
+  };
+
+  const updateEndpointImportReviewItem = (idx, patch) => {
+    setEndpointImportReview((prev) => {
+      if (!prev) return prev;
+      return { ...prev, items: prev.items.map((it, i) => (i === idx ? { ...it, ...patch } : it)) };
+    });
+  };
+
+  const confirmEndpointImport = async () => {
+    if (!endpointImportReview) return;
+    for (const item of endpointImportReview.items.filter((i) => i.selected)) {
+      await addEndpointRow(item.label, item.qty, item.type || null);
+    }
+    setEndpointImportReview(null);
+    setEndpointPasteText("");
+    setShowEndpointPastePanel(false);
+  };
+
   /* ——— resolve the Band Form owner from the URL slug (public, no login needed) ——— */
   useEffect(() => {
     if (!formSlug) return;
@@ -510,7 +662,7 @@ export default function StageAdvance() {
 
   /* ——— load shows + inventory (personal, per signed-in user) ——— */
   useEffect(() => {
-    if (!user) { setShows([]); setInventoryItems([]); setGroupColors({}); setLoaded(false); return; }
+    if (!user) { setShows([]); setInventoryItems([]); setEndpointItems([]); setGroupColors({}); setCustomOutputChips([]); setLoaded(false); return; }
     (async () => {
       try {
         const r = await storage.get(STORAGE_KEY);
@@ -525,7 +677,14 @@ export default function StageAdvance() {
         setGroupColors(r?.value ? JSON.parse(r.value) : {});
       } catch (e) { setGroupColors({}); }
     })();
+    (async () => {
+      try {
+        const r = await storage.get(OUTPUT_CHIPS_KEY);
+        setCustomOutputChips(r?.value ? JSON.parse(r.value) : []);
+      } catch (e) { setCustomOutputChips([]); }
+    })();
     loadInventory();
+    loadEndpoints();
   }, [user]);
 
   const saveGroupColor = async (group, hex) => {
@@ -722,6 +881,165 @@ export default function StageAdvance() {
     updateShow({ channels: arr });
   };
 
+  /* ——— Outputs: same row-level conventions as the input list (add,
+     duplicate, move, drag), but its own list and its own box pool —
+     an output's physical patch destination (AES/Dante/analog local
+     outs) is a different thing from the snake boxes mics plug into,
+     even though the mechanism (named, auto-numbered, override-able)
+     is identical. Lives inside the show's own data, like channels. ——— */
+  const outputs = active?.outputs || [];
+  const outputBoxes = active?.outputBoxes || [];
+  const outputBoxById = (id) => outputBoxes.find((b) => b.id === id);
+
+  const addOutputBox = () => {
+    const name = `Box ${outputBoxes.length + 1}`;
+    updateShow({ outputBoxes: [...outputBoxes, { id: uid(), name, color: "#8a8f98", position: "", description: "" }] });
+  };
+  const updateOutputBox = (boxId, patch) =>
+    updateShow({ outputBoxes: outputBoxes.map((b) => (b.id === boxId ? { ...b, ...patch } : b)) });
+  const removeOutputBox = (boxId) =>
+    updateShow({
+      outputBoxes: outputBoxes.filter((b) => b.id !== boxId),
+      outputs: outputs.map((o) => (o.boxId === boxId ? { ...o, boxId: null, boxPos: null } : o)),
+    });
+
+  const addOutput = () =>
+    updateShow({ outputs: [...outputs, { id: uid(), outputChannel: "", submixName: "", endpoint: "", notes: "", boxId: null, boxPos: null, linkedDown: false }] });
+
+  const updateOutput = (outId, patch) =>
+    updateShow({ outputs: outputs.map((o) => (o.id === outId ? { ...o, ...patch } : o)) });
+
+  const removeOutput = (outId) =>
+    updateShow({ outputs: outputs.filter((o) => o.id !== outId) });
+
+  const duplicateOutput = (outId) => {
+    const idx = outputs.findIndex((o) => o.id === outId);
+    if (idx === -1) return;
+    const copy = { ...outputs[idx], id: uid() };
+    const arr = [...outputs];
+    arr.splice(idx + 1, 0, copy);
+    updateShow({ outputs: arr });
+  };
+
+  /* A linked pair travels together on reorder — otherwise moving just
+     one half would silently break the pairing (linkedDown assumes the
+     partner is the very next row). Returns the [start, end] indices
+     (inclusive) of the unit containing idx: the pair if idx is either
+     half of one, otherwise just idx itself. */
+  const getOutputMoveGroup = (idx) => {
+    if (outputs[idx]?.linkedDown) return [idx, idx + 1];
+    if (idx > 0 && outputs[idx - 1]?.linkedDown) return [idx - 1, idx];
+    return [idx, idx];
+  };
+
+  const moveOutput = (idx, dir) => {
+    const [start, end] = getOutputMoveGroup(idx);
+    const arr = [...outputs];
+    if (dir < 0) {
+      if (start - 1 < 0) return;
+      const [moved] = arr.splice(start - 1, 1);
+      arr.splice(end, 0, moved);
+    } else {
+      if (end + 1 >= arr.length) return;
+      const [moved] = arr.splice(end + 1, 1);
+      arr.splice(start, 0, moved);
+    }
+    updateShow({ outputs: arr });
+  };
+
+  const dropOutput = (from, to) => {
+    if (from === null || to === null || from === to) return;
+    const [start, end] = getOutputMoveGroup(from);
+    if (to >= start && to <= end) return; // dropped within its own linked pair — no-op
+    const groupSize = end - start + 1;
+    const arr = [...outputs];
+    const movedGroup = arr.splice(start, groupSize);
+    const insertAt = to > end ? to - groupSize + 1 : to;
+    arr.splice(insertAt, 0, ...movedGroup);
+    updateShow({ outputs: arr });
+  };
+
+  /* Stereo Link: purely a visual/organizational pairing (does not tie
+     the two rows' data together) — marks that this row and the one
+     directly below it are a stereo pair, e.g. Main L/R. */
+  const toggleOutputLink = (outId) =>
+    updateShow({ outputs: outputs.map((o) => (o.id === outId ? { ...o, linkedDown: !o.linkedDown } : o)) });
+
+  /* Quick-add chips. A stereo chip (e.g. "Main L/R") adds two rows in one
+     update — "Main L" stereo-linked to "Main R" — and the link can still
+     be toggled off per row afterward, like any other pair. */
+  const addOutputFromChip = (chip) => {
+    const blank = { outputChannel: "", submixName: "", endpoint: "", notes: "", boxId: null, boxPos: null, linkedDown: false };
+    const rows = chip.stereo
+      ? [
+          { id: uid(), ...blank, outputChannel: `${chip.name} L`, linkedDown: true },
+          { id: uid(), ...blank, outputChannel: `${chip.name} R` },
+        ]
+      : [{ id: uid(), ...blank, outputChannel: chip.name }];
+    updateShow({ outputs: [...outputs, ...rows] });
+  };
+
+  const saveCustomOutputChips = async (next) => {
+    setCustomOutputChips(next);
+    try { await storage.set(OUTPUT_CHIPS_KEY, JSON.stringify(next)); }
+    catch (e) { console.error("couldn't save output chips", e); }
+  };
+
+  const addCustomOutputChip = () => {
+    const name = newChipName.trim();
+    if (!name) return;
+    const dupe = [...DEFAULT_OUTPUT_CHIPS, ...customOutputChips].some(
+      (c) => c.name.toLowerCase() === name.toLowerCase() && Boolean(c.stereo) === newChipStereo
+    );
+    if (!dupe) saveCustomOutputChips([...customOutputChips, { id: uid(), name, stereo: newChipStereo }]);
+    setNewChipName("");
+    setNewChipStereo(false);
+  };
+
+  const removeCustomOutputChip = (chipId) =>
+    saveCustomOutputChips(customOutputChips.filter((c) => c.id !== chipId));
+
+  /* Keyboard shortcuts for the input list and the output list — acts on
+     whichever row contains the current keyboard focus (see the
+     data-channel-id / data-output-id lookups below), same model a
+     spreadsheet uses for "the focused cell". Desktop-only by nature (no
+     physical keys on a touchscreen) — the ↑/↓/⧉ buttons remain the real
+     cross-device way to do this, these are just an accelerator layered
+     on top. */
+  useEffect(() => {
+    if (mode !== "plan" || !active) return;
+    const onKeyDown = (e) => {
+      if (e.key === "Escape" && openColorPickerId) {
+        setOpenColorPickerId(null);
+        return;
+      }
+      const chRow = document.activeElement?.closest?.(".sa-ch");
+      const outRow = document.activeElement?.closest?.(".sa-out");
+      const chId = chRow?.dataset?.channelId;
+      const outId = outRow?.dataset?.outputId;
+      if (!chId && !outId) return;
+      if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+        e.preventDefault();
+        const dir = e.key === "ArrowUp" ? -1 : 1;
+        if (chId) {
+          const idx = active.channels.findIndex((c) => c.id === chId);
+          if (idx !== -1) moveChannel(idx, dir);
+        } else {
+          const idx = outputs.findIndex((o) => o.id === outId);
+          if (idx !== -1) moveOutput(idx, dir);
+        }
+      } else if (
+        e.key.toLowerCase() === "d" && !e.metaKey && !e.ctrlKey && !e.altKey &&
+        !isTextEntryTarget(document.activeElement)
+      ) {
+        e.preventDefault();
+        if (chId) duplicateChannel(chId); else duplicateOutput(outId);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [mode, active, openColorPickerId]);
+
   const sortByGroup = () => updateShow({ channels: groupSort(active.channels) });
 
   const deleteShow = (id) => {
@@ -794,6 +1112,35 @@ export default function StageAdvance() {
     });
   const sbDupeSet = new Set(sbDupes.map(([key]) => key));
 
+  /* Same box-position mechanism as inputs, but an output with no
+     explicit box defaults to a built-in "Local" pseudo-box instead of
+     showing nothing — physical local outs are the assumed default
+     until overridden with a real box (AES, Dante, etc.). */
+  const OUTPUT_LOCAL_BOX = "__local";
+  const outputBoxPosCounters = {};
+  const outputsWithBoxPos = outputs.map((o) => {
+    const boxId = o.boxId || OUTPUT_LOCAL_BOX;
+    outputBoxPosCounters[boxId] = (outputBoxPosCounters[boxId] || 0) + 1;
+    return { ...o, _boxId: boxId, _boxPos: o.boxPos ?? outputBoxPosCounters[boxId] };
+  });
+  const outputBoxLabel = (o) => {
+    const name = o._boxId === OUTPUT_LOCAL_BOX ? "Local" : (outputBoxById(o._boxId)?.name || "?");
+    return `${name}${o._boxPos}`;
+  };
+  const outputDupeMap = {};
+  outputsWithBoxPos.forEach((o, i) => {
+    const key = `${o._boxId}:${o._boxPos}`;
+    (outputDupeMap[key] = outputDupeMap[key] || []).push(i + 1);
+  });
+  const outputDupes = Object.entries(outputDupeMap)
+    .filter(([, os]) => os.length > 1)
+    .map(([key, os]) => {
+      const [boxId, pos] = key.split(":");
+      const name = boxId === OUTPUT_LOCAL_BOX ? "Local" : (outputBoxById(boxId)?.name || "?");
+      return [key, `${name}${pos}`, os];
+    });
+  const outputDupeSet = new Set(outputDupes.map(([key]) => key));
+
   /* ——— export ——— */
   const exportText = () => {
     if (!active) return "";
@@ -816,6 +1163,17 @@ export default function StageAdvance() {
       out += `⚠ BOX DUPES: ${sbDupes.map(([, label, chs]) => `${label} → CH ${chs.join(" & ")}`).join(", ")}\n`;
     if (active.monitors) out += `MONITORS: ${active.monitors}\n`;
     if (active.notes) out += `NOTES:\n${active.notes}\n`;
+
+    if (outputsWithBoxPos.length > 0) {
+      out += `\n\nOUTPUT LIST — ${active.band || "Untitled"}\n`;
+      out += `\n#   ${pad("OUTPUT CHANNEL", 20)}${pad("SUBMIX", 16)}${pad("ENDPOINT", 20)}${pad("SB", 8)}NOTES\n`;
+      out += "—".repeat(88) + "\n";
+      outputsWithBoxPos.forEach((o, i) => {
+        out += `${pad(i + 1, 4)}${pad(o.outputChannel, 20)}${pad(o.submixName, 16)}${pad(o.endpoint, 20)}${pad(outputBoxLabel(o), 8)}${o.notes || ""}\n`;
+      });
+      if (outputDupes.length)
+        out += `⚠ BOX DUPES: ${outputDupes.map(([, label, os]) => `${label} → output ${os.join(" & ")}`).join(", ")}\n`;
+    }
     return out;
   };
 
@@ -834,6 +1192,54 @@ export default function StageAdvance() {
     setTimeout(() => setCopied(false), 1600);
   };
 
+  /* ——— CSV/XLSX export: for engineers who want StageAdvance data in
+     their own spreadsheet workflow. `xlsx` is already a dependency
+     (used for import), loaded lazily here same as there. Structured as
+     a list of named sheets so an Outputs sheet can slot in alongside
+     "Input List" once that feature exists — nothing here should need
+     to change shape when it does, just an extra sheet appended. ——— */
+  const EXPORT_COLUMNS = ["CH", "Source", "Mic / DI", "Stand", "48V", "Notes", "Position", "Stage Box"];
+  const channelExportRows = () => channelsWithBoxPos.map((c, i) => [
+    i + 1, c.name, c.mic, c.stand === "None" ? "" : c.stand, c.phantom ? "48V" : "", c.note || "", c.position || "", boxLabel(c),
+  ]);
+  const OUTPUT_EXPORT_COLUMNS = ["#", "Output Channel", "Submix", "Stereo Link", "Endpoint", "Notes", "Stage Box"];
+  const outputExportRows = () => outputsWithBoxPos.map((o, i) => [
+    i + 1, o.outputChannel, o.submixName, o.linkedDown ? "linked ↓" : "", o.endpoint, o.notes || "", outputBoxLabel(o),
+  ]);
+  const exportFilenameBase = () =>
+    `stageadvance-${(active.band || "show").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "show"}`;
+  const downloadBlob = (blob, filename) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+  const toCsv = (rows) => rows.map((r) => r.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
+
+  const exportCsv = () => {
+    const csv = toCsv([EXPORT_COLUMNS, ...channelExportRows()]);
+    downloadBlob(new Blob([csv], { type: "text/csv" }), `${exportFilenameBase()}-input-list.csv`);
+  };
+
+  const exportOutputsCsv = () => {
+    const csv = toCsv([OUTPUT_EXPORT_COLUMNS, ...outputExportRows()]);
+    downloadBlob(new Blob([csv], { type: "text/csv" }), `${exportFilenameBase()}-output-list.csv`);
+  };
+
+  const exportXlsx = async () => {
+    const XLSX = await import("xlsx");
+    const wb = XLSX.utils.book_new();
+    const inputSheet = XLSX.utils.aoa_to_sheet([EXPORT_COLUMNS, ...channelExportRows()]);
+    XLSX.utils.book_append_sheet(wb, inputSheet, "Input List");
+    if (outputsWithBoxPos.length > 0) {
+      const outputSheet = XLSX.utils.aoa_to_sheet([OUTPUT_EXPORT_COLUMNS, ...outputExportRows()]);
+      XLSX.utils.book_append_sheet(wb, outputSheet, "Output List");
+    }
+    const buf = XLSX.write(wb, { type: "array", bookType: "xlsx" });
+    downloadBlob(new Blob([buf], { type: "application/octet-stream" }), `${exportFilenameBase()}.xlsx`);
+  };
+
   /* ——— standalone crew sheet (opens in new tab; window.print is blocked in-app) ——— */
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
 
@@ -841,16 +1247,78 @@ export default function StageAdvance() {
     const rows = channelsWithBoxPos.map((c, i) => `
       <tr>
         <td class="num">${i + 1}</td>
-        <td><span class="sw" style="background:${channelColor(c)}"></span>${esc(c.name)}</td>
+        <td class="nw"><span class="sw" style="background:${channelColor(c)}"></span>${esc(c.name)}</td>
         <td>${esc(c.mic)}${isRental(c.mic) ? " <b>(RENTAL)</b>" : ""}</td>
-        <td>${c.stand === "None" ? "—" : esc(c.stand)}</td>
+        <td class="nw">${c.stand === "None" ? "—" : esc(c.stand)}</td>
         <td class="p48">${c.phantom ? "48V" : ""}</td>
         <td>${esc(c.note)}</td>
         <td style="width:auto">${esc(c.position) || ""}</td>
         <td style="width:auto">${c.boxId && boxById(c.boxId) ? `<span class="sw" style="background:${boxById(c.boxId).color}"></span>` : ""}${esc(boxLabel(c))}</td>
       </tr>`).join("");
 
+    const outputRows = outputsWithBoxPos.map((o, i) => `
+      <tr>
+        <td class="num">${i + 1}</td>
+        <td>${esc(o.outputChannel)}${o.linkedDown ? ` <span style="color:#4E8FD1">↓ linked</span>` : ""}</td>
+        <td>${esc(o.submixName)}</td>
+        <td>${esc(o.endpoint)}</td>
+        <td>${esc(o.notes)}</td>
+        <td style="width:auto">${o.boxId && outputBoxById(o.boxId) ? `<span class="sw" style="background:${outputBoxById(o.boxId).color}"></span>` : ""}${esc(outputBoxLabel(o))}</td>
+      </tr>`).join("");
+
+    /* The show header (band + meta) lives inside each section's <thead>
+       so the browser repeats it on every printed page — including when
+       a long input list spills onto page 2, 3, etc. Every section
+       (inputs, outputs, gear pull) carries the same header. */
+    const headerHtml = (label) => `
+      <div class="head"><div class="band">${esc(active.band || "Untitled show")}</div><div class="brand">${label} · StageAdvance</div></div>
+      <div class="meta">
+        ${active.date ? `<div><b>Date</b>${esc(active.date)}</div>` : ""}
+        ${active.venue ? `<div><b>Venue</b>${esc(active.venue)}</div>` : ""}
+        ${active.contact ? `<div><b>Band contact</b>${esc(active.contact)}</div>` : ""}
+        ${active.monitors ? `<div><b>Monitors</b>${esc(active.monitors)}</div>` : ""}
+        <div><b>Channels</b>${active.channels.length}</div>
+        ${outputsWithBoxPos.length ? `<div><b>Outputs</b>${outputsWithBoxPos.length}</div>` : ""}
+      </div>`;
+    const theadHtml = (label, colHeads, colCount) =>
+      `<thead><tr><td class="hdr" colspan="${colCount}">${headerHtml(label)}</td></tr><tr>${colHeads}</tr></thead>`;
+
+    const shortageAlert = shortages.length
+      ? `<div class="alert">⚠ OVER INVENTORY: ${shortages.map(([k, v]) => `${esc(k)} — need ${v}, own ${inventory[k]}`).join(" · ")}</div>` : "";
+    const inputAlerts = shortageAlert +
+      (sbDupes.length ? `<div class="alert">⚠ BOX CONFLICTS: ${sbDupes.map(([, label, chs]) => `${label} → CH ${chs.join(" & ")}`).join(" · ")}</div>` : "");
+
+    const outputSection = outputsWithBoxPos.length === 0 ? "" : `
+      <div style="break-before:page; page-break-before:always;">
+        <table>
+          ${theadHtml("Output List", "<th>#</th><th>Output Channel</th><th>Submix</th><th>Endpoint</th><th>Notes</th><th>Stage Box or Physical Outs</th>", 6)}
+          <tbody>
+            ${outputDupes.length ? `<tr><td class="nb" colspan="6"><div class="alert">⚠ BOX CONFLICTS: ${outputDupes.map(([, label, os]) => `${label} → output ${os.join(" & ")}`).join(" · ")}</div></td></tr>` : ""}
+            ${outputRows}
+          </tbody>
+        </table>
+      </div>`;
+
     const line = ([k, v]) => `<div class="line"><span>${esc(k)}${isRental(k) ? " (RENTAL)" : ""}</span><b>${v}${inventory[k] !== undefined ? ` / ${inventory[k]}` : ""}</b></div>`;
+
+    // Gear pull goes last, on its own page, with the same header.
+    const gearSection = `
+      <div style="break-before:page; page-break-before:always;">
+        <table>
+          <thead><tr><td class="hdr">${headerHtml("Gear Pull")}</td></tr></thead>
+          <tbody><tr><td class="nb">
+            ${shortageAlert}
+            <div class="cols">
+              <div class="col"><div class="h">Mic pull</div>${micCounts.map(line).join("")}</div>
+              <div class="col"><div class="h">Stands</div>${standCounts.map(([k, v]) => `<div class="line"><span>${esc(k)}</span><b>${v}</b></div>`).join("")}</div>
+              <div class="col">
+                <div class="h">Phantom channels</div><div style="font-size:13px;font-weight:800;padding:2px 0">${phantomCh.length ? phantomCh.join(", ") : "none"}</div>
+                <div class="h" style="margin-top:8px">XLR lines</div><div style="font-size:13px;font-weight:800;padding:2px 0">${active.channels.length} + monitors</div>
+              </div>
+            </div>
+          </td></tr></tbody>
+        </table>
+      </div>`;
 
     return `<!DOCTYPE html><html><head><meta charset="utf-8">
 <title>Input List — ${esc(active.band || "Untitled")}</title>
@@ -865,6 +1333,10 @@ export default function StageAdvance() {
   th { text-align:left; font-size:9px; letter-spacing:.1em; text-transform:uppercase; border-bottom:2px solid #000; padding:3px 6px; }
   td { border-bottom:1px solid #ccc; padding:5px 6px; vertical-align:top; }
   tr { break-inside:avoid; }
+  thead { display:table-header-group; } /* repeats the header on every printed page */
+  td.nw { white-space:nowrap; } /* keep short names like "Drum clamp" / "Gtr Modeler L" on one line */
+  td.hdr, td.nb { border-bottom:none; padding:0; }
+  td.hdr { padding-bottom:4px; }
   .num { font-weight:800; text-align:right; width:24px; }
   .sw { display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:6px; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
   .p48 { font-weight:800; font-size:11px; text-align:center; }
@@ -879,27 +1351,16 @@ export default function StageAdvance() {
   @media print { .printbtn { display:none; } @page { margin: 12mm; } body { margin:0 auto; } }
 </style></head><body>
 <button class="printbtn" onclick="window.print()">🖨 Print</button>
-<div class="head"><div class="band">${esc(active.band || "Untitled show")}</div><div class="brand">Input List · StageAdvance</div></div>
-<div class="meta">
-  ${active.date ? `<div><b>Date</b>${esc(active.date)}</div>` : ""}
-  ${active.venue ? `<div><b>Venue</b>${esc(active.venue)}</div>` : ""}
-  ${active.contact ? `<div><b>Band contact</b>${esc(active.contact)}</div>` : ""}
-  ${active.monitors ? `<div><b>Monitors</b>${esc(active.monitors)}</div>` : ""}
-  <div><b>Channels</b>${active.channels.length}</div>
-</div>
-${shortages.length ? `<div class="alert">⚠ OVER INVENTORY: ${shortages.map(([k, v]) => `${esc(k)} — need ${v}, own ${inventory[k]}`).join(" · ")}</div>` : ""}
-${sbDupes.length ? `<div class="alert">⚠ BOX CONFLICTS: ${sbDupes.map(([, label, chs]) => `${label} → CH ${chs.join(" & ")}`).join(" · ")}</div>` : ""}
-<table><thead><tr><th>CH</th><th>Source</th><th>Mic / DI</th><th>Stand</th><th style="text-align:center">48V</th><th>Notes</th><th>Position</th><th>Stage Box</th></tr></thead>
-<tbody>${rows}</tbody></table>
-<div class="cols">
-  <div class="col"><div class="h">Mic pull</div>${micCounts.map(line).join("")}</div>
-  <div class="col"><div class="h">Stands</div>${standCounts.map(([k, v]) => `<div class="line"><span>${esc(k)}</span><b>${v}</b></div>`).join("")}</div>
-  <div class="col">
-    <div class="h">Phantom channels</div><div style="font-size:13px;font-weight:800;padding:2px 0">${phantomCh.length ? phantomCh.join(", ") : "none"}</div>
-    <div class="h" style="margin-top:8px">XLR lines</div><div style="font-size:13px;font-weight:800;padding:2px 0">${active.channels.length} + monitors</div>
-  </div>
-</div>
+<table>
+  ${theadHtml("Input List", `<th>CH</th><th>Source</th><th>Mic / DI</th><th>Stand</th><th style="text-align:center">48V</th><th>Notes</th><th>Position</th><th>Stage Box or Physical Outs</th>`, 8)}
+  <tbody>
+    ${inputAlerts ? `<tr><td class="nb" colspan="8">${inputAlerts}</td></tr>` : ""}
+    ${rows}
+  </tbody>
+</table>
 ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(active.notes)}</div>` : ""}
+${outputSection}
+${gearSection}
 <div class="foot"><span>Printed ${new Date().toLocaleDateString()}</span><span>Mic pull shows need / owned · RENTAL items must be sourced before load-in</span></div>
 <script>window.onload = function(){ setTimeout(function(){ try { window.print(); } catch(e){} }, 400); };</script>
 </body></html>`;
@@ -937,7 +1398,7 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
     .sa-logo span { color:#E8B93E; }
     .sa-sub { color:#8a8f98; font-size:13px; }
     .sa-tabs { display:flex; gap:4px; margin-left:auto; background:#1f2127; border:1px solid #2c2f37; border-radius:8px; padding:3px; }
-    .sa-tab { border:none; background:transparent; color:#8a8f98; font-weight:700; font-size:13px; padding:6px 14px; border-radius:6px; cursor:pointer; }
+    .sa-tab { border:none; background:transparent; color:#8a8f98; font-weight:700; font-size:13px; padding:6px 14px; border-radius:6px; cursor:pointer; text-decoration:none; display:inline-block; }
     .sa-tab.on { background:#E8B93E; color:#1a1408; }
     .sa-card { background:#1f2127; border:1px solid #2c2f37; border-radius:10px; padding:16px; }
     .sa-btn { background:#2c2f37; color:#e7e6e2; border:1px solid #3a3e48; border-radius:7px; padding:7px 13px; font-size:13px; font-weight:600; cursor:pointer; transition: background .12s, border-color .12s; }
@@ -964,9 +1425,13 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
     .sa-ch.drag-over { border-top:2px solid #E8B93E; }
     .sa-ch.dragging { opacity:.35; }
     .sa-ch.short-row { box-shadow: inset 0 0 0 1px #D64545; background:#2a1a1a; border-radius:6px; }
-    .sa-handle { color:#5a5f6a; cursor:grab; user-select:none; font-size:14px; line-height:1; text-align:center; padding:6px 2px; touch-action:none; }
+    /* Row containing keyboard focus — visible feedback for which row
+       "D" / Alt+↑↓ apply to, so it's never a guess. */
+    .sa-ch:focus-within { background:#20242b; box-shadow: inset 3px 0 0 #E8B93E; }
+    .sa-handle { color:#5a5f6a; cursor:grab; user-select:none; font-size:14px; line-height:1; text-align:center; padding:6px 2px; touch-action:none; border-radius:4px; }
     .sa-handle:hover { color:#e7e6e2; }
     .sa-handle:active { cursor:grabbing; }
+    .sa-handle:focus-visible { outline:2px solid #E8B93E; outline-offset:1px; color:#e7e6e2; }
     .sa-chnum { font-weight:800; font-size:15px; text-align:right; color:#8a8f98; }
     .sa-strip { width:16px; height:30px; border-radius:2px; padding:0; cursor:pointer; }
     .sa-swatchgrid { display:grid; grid-template-columns: repeat(6, 20px); gap:6px; }
@@ -998,6 +1463,16 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
     .sa-member { display:grid; grid-template-columns: 1.2fr 1.2fr 1fr 36px; gap:8px; align-items:end; padding:8px 0; border-bottom:1px dashed #2c2f37; }
     .sa-empty { text-align:center; color:#8a8f98; padding:40px 20px; }
     .sa-colhead { display:grid; grid-template-columns: 22px 34px 6px 1.3fr 1.2fr 0.9fr 44px 1.2fr 100px 100px 88px; gap:8px; padding:4px 8px; font-size:10px; text-transform:uppercase; letter-spacing:.1em; color:#5a5f6a; }
+    /* ——— Output list — same row conventions as the input list (.sa-ch),
+       fewer/different columns. ——— */
+    .sa-out { display:grid; grid-template-columns: 22px 30px 1.1fr 1.1fr 1.2fr 1.2fr 100px 130px; gap:8px; align-items:center; padding:6px 8px; border-bottom:1px solid #26282f; }
+    .sa-out:nth-child(odd of .sa-out) { background:#1c1e23; }
+    .sa-out.drag-over { border-top:2px solid #E8B93E; }
+    .sa-out.dragging { opacity:.35; }
+    .sa-out:focus-within { background:#20242b; box-shadow: inset 3px 0 0 #E8B93E; }
+    .sa-out input, .sa-out select { background:#17181c; border:1px solid #2c2f37; color:#e7e6e2; border-radius:5px; padding:5px 7px; font-size:13px; width:100%; box-sizing:border-box; }
+    .sa-out-colhead { display:grid; grid-template-columns: 22px 30px 1.1fr 1.1fr 1.2fr 1.2fr 100px 130px; gap:8px; padding:4px 8px; font-size:10px; text-transform:uppercase; letter-spacing:.1em; color:#5a5f6a; }
+    .sa-link-btn.on { background:#4E8FD1; border-color:#4E8FD1; color:#fff; }
     .sa-fieldlabel { display:none; font-size:9px; text-transform:uppercase; letter-spacing:.06em; color:#8a8f98; margin-bottom:2px; }
     .sa-sb.override { border-color:#E8B93E !important; color:#E8B93E; font-weight:800; }
     .sa-sb.dupe { border-color:#D64545 !important; color:#ff8f8f; font-weight:800; }
@@ -1008,6 +1483,11 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
     @media (max-width: 780px) {
       .sa-ch { grid-template-columns: 18px 26px 28px 1fr 1fr 40px; grid-auto-rows:auto; }
       .sa-colhead { display:none; }
+      /* Source name and Mic/DI were forced into two cramped half-width
+         columns here, clipping mic names — give each its own full-
+         width row like every other field in this card. */
+      .sa-ch .m-namewrap { grid-column: 1 / -1; }
+      .sa-ch .sa-micwrap { grid-column: 1 / -1; }
       .sa-ch .m-standwrap { grid-column: 4 / 5; }
       .sa-ch .m-note { grid-column: 4 / 6; }
       .sa-ch .m-poswrap { grid-column: 1 / -1; display:flex; gap:8px; align-items:center; }
@@ -1023,6 +1503,12 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
       .sa-tabs > .sa-sub { display:none; }
       .sa-strip { width:28px; height:36px; }
       .sa-swatch { width:28px; height:28px; }
+      /* Outputs: simple, robust full-width stacking rather than hand-
+         packed columns — a new component, no existing tuned layout to
+         preserve, so favor legibility over density here. */
+      .sa-out { grid-template-columns: 18px 24px 1fr; grid-auto-rows:auto; }
+      .sa-out-colhead { display:none; }
+      .sa-out .m-submixwrap, .sa-out .m-endpointwrap, .sa-out .m-outnotewrap, .sa-out .m-outsbwrap, .sa-out .sa-rowbtns { grid-column: 1 / -1; }
     }
     /* ——— PRINT: hide the app, show the crew sheet ——— */
     .print-sheet { display:none; }
@@ -1040,6 +1526,9 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
       .ps-table th { text-align:left; font-size:7.5pt; letter-spacing:.1em; text-transform:uppercase; border-bottom:2px solid #000; padding:3px 6px; }
       .ps-table td { border-bottom:1px solid #ccc; padding:4px 6px; vertical-align:top; }
       .ps-table tr { break-inside:avoid; }
+      .ps-table thead { display:table-header-group; } /* repeats the header on every printed page */
+      .ps-table td.ps-hdr, .ps-table td.ps-nb { border-bottom:none; padding:0; }
+      .ps-table td.ps-hdr { padding-bottom:4px; }
       .ps-num { font-weight:800; text-align:right; width:24px; }
       .ps-swatch { display:inline-block; width:8pt; height:8pt; border-radius:2px; margin-right:6px; vertical-align:middle; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
       .ps-48 { font-weight:800; font-size:8.5pt; text-align:center; }
@@ -1456,9 +1945,13 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
           inventoryItems.map((i) => (
             <div key={i.id} style={{ padding: "10px 0", borderBottom: "1px dashed #2c2f37" }}>
               <div className="sa-member" style={{ gridTemplateColumns: "1fr 90px auto" }}>
-                <input className="sa-input" value={i.label}
-                  onChange={(e) => setInventoryItems((prev) => prev.map((x) => (x.id === i.id ? { ...x, label: e.target.value } : x)))}
-                  onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== i.label) updateLockerItem(i.id, { label: v }); }} />
+                <input className="sa-input" key={`${i.id}:${i.label}`} defaultValue={i.label}
+                  onBlur={(e) => {
+                    const v = e.target.value.trim();
+                    if (!v) { e.target.value = i.label; return; }
+                    if (v !== i.label) updateLockerItem(i.id, { label: v });
+                  }}
+                  onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} />
                 <input className="sa-input" type="number" min="0" value={i.qty}
                   onChange={(e) => {
                     const qty = Math.max(0, Number(e.target.value) || 0);
@@ -1595,6 +2088,150 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
           )}
         </div>
       </div>
+
+      {/* ——— Endpoint locker (for the Outputs section) ——— */}
+      <div className="sa-card">
+        <h2 className="sa-h2">Your endpoints</h2>
+        <div className="sa-sub" style={{ marginBottom: 14 }}>
+          The speakers, amps, and other output endpoints you own. Feeds the "Endpoint" picker
+          when building an output list. Tagging is manual here — nothing gets auto-suggested.
+        </div>
+
+        {endpointItems.length === 0 ? (
+          <div className="sa-sub">
+            Your endpoints list is empty — add your first speaker or amp below to get started.
+          </div>
+        ) : (
+          endpointItems.map((i) => (
+            <div key={i.id} style={{ padding: "10px 0", borderBottom: "1px dashed #2c2f37" }}>
+              <div className="sa-member" style={{ gridTemplateColumns: "1fr 90px auto" }}>
+                <input className="sa-input" key={`${i.id}:${i.label}`} defaultValue={i.label}
+                  onBlur={(e) => {
+                    const v = e.target.value.trim();
+                    if (!v) { e.target.value = i.label; return; }
+                    if (v !== i.label) updateEndpointRow(i.id, { label: v });
+                  }}
+                  onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} />
+                <input className="sa-input" type="number" min="0" value={i.qty}
+                  onChange={(e) => {
+                    const qty = Math.max(0, Number(e.target.value) || 0);
+                    setEndpointItems((prev) => prev.map((x) => (x.id === i.id ? { ...x, qty } : x)));
+                  }}
+                  onBlur={(e) => updateEndpointRow(i.id, { qty: Math.max(0, Number(e.target.value) || 0) })} />
+                <button className="sa-btn ghost danger" title="Remove" onClick={() => removeEndpointRow(i.id)}>✕</button>
+              </div>
+              <select className="sa-input" style={{ maxWidth: 180, marginTop: 8 }} value={i.type || ""}
+                onChange={(e) => updateEndpointRow(i.id, { type: e.target.value || null })}>
+                <option value="">Type…</option>
+                {ENDPOINT_TYPE_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+          ))
+        )}
+
+        {endpointErr && <div className="sa-shortbanner" style={{ marginTop: 10 }}>{endpointErr}</div>}
+
+        <div className="sa-member" style={{ gridTemplateColumns: "1fr 90px auto", marginTop: 14 }}>
+          <input className="sa-input" value={endpointLabelDraft} placeholder="e.g. QSC HPR152F"
+            onChange={(e) => setEndpointLabelDraft(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && (() => {
+              addEndpointRow(endpointLabelDraft, Math.max(0, Number(endpointQtyDraft) || 0), endpointTypeDraft);
+              setEndpointLabelDraft(""); setEndpointQtyDraft("1"); setEndpointTypeDraft("");
+            })()} />
+          <input className="sa-input" type="number" min="0" value={endpointQtyDraft}
+            onChange={(e) => setEndpointQtyDraft(e.target.value)} />
+          <button className="sa-btn primary" onClick={() => {
+            addEndpointRow(endpointLabelDraft, Math.max(0, Number(endpointQtyDraft) || 0), endpointTypeDraft);
+            setEndpointLabelDraft(""); setEndpointQtyDraft("1"); setEndpointTypeDraft("");
+          }}>+ Add</button>
+        </div>
+        <select className="sa-input" style={{ maxWidth: 180, marginTop: 8 }} value={endpointTypeDraft}
+          onChange={(e) => setEndpointTypeDraft(e.target.value)}>
+          <option value="">Type… (optional)</option>
+          {ENDPOINT_TYPE_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
+        </select>
+
+        <div style={{ marginTop: 18, paddingTop: 14, borderTop: "1px solid #2c2f37" }}>
+          {endpointImportReview ? (
+            <div className="sa-card" style={{ background: "#20242b" }}>
+              <div style={{ fontWeight: 700, marginBottom: 4 }}>Review before importing</div>
+              <div className="sa-sub" style={{ marginBottom: 10 }}>
+                {endpointImportReview.items.length} item{endpointImportReview.items.length === 1 ? "" : "s"} found
+                {endpointImportReview.items.some((i) => i.status === "duplicate") && `, ${endpointImportReview.items.filter((i) => i.status === "duplicate").length} already in your endpoints (unchecked)`}.
+                Set a type for each if you'd like — optional.
+              </div>
+              {endpointImportReview.items.map((item, idx) => (
+                <div key={idx} style={{ padding: "8px 0", borderBottom: "1px dashed #2c2f37" }}>
+                  <div className="sa-member" style={{ gridTemplateColumns: "auto 1fr 90px", alignItems: "center" }}>
+                    <input type="checkbox" checked={item.selected}
+                      onChange={(e) => updateEndpointImportReviewItem(idx, { selected: e.target.checked })} />
+                    <div>
+                      <b>{item.label}</b>
+                      {item.status === "duplicate" && <span className="sa-sub"> — already in your endpoints</span>}
+                    </div>
+                    <input className="sa-input" type="number" min="0" value={item.qty}
+                      onChange={(e) => updateEndpointImportReviewItem(idx, { qty: Math.max(0, Number(e.target.value) || 0) })} />
+                  </div>
+                  <select className="sa-input" style={{ maxWidth: 180, marginTop: 6 }} value={item.type || ""}
+                    onChange={(e) => updateEndpointImportReviewItem(idx, { type: e.target.value })}>
+                    <option value="">Type…</option>
+                    {ENDPOINT_TYPE_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+              ))}
+              <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+                <button className="sa-btn primary" onClick={confirmEndpointImport}>
+                  Import {endpointImportReview.items.filter((i) => i.selected).length} item{endpointImportReview.items.filter((i) => i.selected).length === 1 ? "" : "s"}
+                </button>
+                <button className="sa-btn ghost" onClick={() => setEndpointImportReview(null)}>Cancel</button>
+              </div>
+            </div>
+          ) : showEndpointPastePanel ? (
+            <div>
+              <div className="sa-sub" style={{ marginBottom: 8 }}>
+                Paste your list below — one endpoint per line, quantities optional (e.g. "2x QSC HPR152F").
+              </div>
+              <textarea className="sa-input" rows={8} value={endpointPasteText}
+                placeholder={"QSC HPR152F\n2x JBL EON712\n…"}
+                onChange={(e) => setEndpointPasteText(e.target.value)} />
+              <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                <button className="sa-btn primary" onClick={startEndpointPasteImport} disabled={!endpointPasteText.trim()}>
+                  Parse &amp; review
+                </button>
+                <button className="sa-btn ghost" onClick={() => { setShowEndpointPastePanel(false); setEndpointPasteText(""); }}>Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <div className="sa-sub" style={{ marginBottom: 10 }}>
+                Already have an endpoint list somewhere? Import it instead of adding items one by one.
+              </div>
+              <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
+                <div>
+                  <button className="sa-btn ghost" onClick={() => setShowEndpointPastePanel(true)}>📋 Paste a list</button>
+                  <div className="sa-sub" style={{ fontSize: 11, marginTop: 4, maxWidth: 230 }}>
+                    Paste your endpoint inventory as plain text
+                  </div>
+                </div>
+                <div>
+                  <input ref={endpointFileInputRef} type="file" accept=".csv,.xlsx,.xls" style={{ display: "none" }}
+                    onChange={(e) => {
+                      const file = e.target.files[0];
+                      e.target.value = "";
+                      if (file) handleEndpointFileImport(file);
+                    }} />
+                  <button className="sa-btn ghost" onClick={() => endpointFileInputRef.current.click()}>
+                    📁 Upload a file
+                  </button>
+                  <div className="sa-sub" style={{ fontSize: 11, marginTop: 4, maxWidth: 230 }}>
+                    CSV or Excel (.csv, .xlsx) — 2 columns: endpoint model &amp; quantity
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 
@@ -1646,6 +2283,17 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
         ))}
       </div>
 
+      <div className="sa-card" style={{ textAlign: "center" }}>
+        <h2 className="sa-h2">Support StageAdvance</h2>
+        <div className="sa-sub" style={{ marginBottom: 14 }}>
+          StageAdvance is free to use. If it saves you time, voluntary support helps keep it running.
+        </div>
+        <a href="https://ko-fi.com/stageadvance" target="_blank" rel="noopener noreferrer"
+          className="sa-btn" style={{ padding: "10px 22px", fontSize: 14, textDecoration: "none", display: "inline-block" }}>
+          ☕ Support us on Ko-fi
+        </a>
+      </div>
+
       <div className="sa-card">
         <h2 className="sa-h2">Your data</h2>
         <div className="sa-sub" style={{ marginBottom: 12 }}>
@@ -1685,6 +2333,11 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
         {printMsg && <span className="sa-sub">{printMsg}</span>}
         <button className="sa-btn" onClick={() => duplicateShow(active.id)}>Duplicate</button>
         <button className="sa-btn" onClick={copyList}>{copied ? "Copied ✓" : "Copy as text"}</button>
+        <button className="sa-btn" onClick={exportCsv} title="Download the input list as a .csv file">Export CSV</button>
+        {outputs.length > 0 && (
+          <button className="sa-btn" onClick={exportOutputsCsv} title="Download the output list as a .csv file">Export Outputs CSV</button>
+        )}
+        <button className="sa-btn" onClick={exportXlsx} title="Download the input list (and output list, if any) as a .xlsx file">Export XLSX</button>
         <button className="sa-btn" onClick={openPrintSheet}>Print crew sheet</button>
       </div>
 
@@ -1747,75 +2400,98 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
         </div>
       </div>
 
+      {/* Input list utilities — deliberately a slim bar, not a titled
+          card, so these read as tools for the list below rather than
+          part of its column structure (matches the "← All shows /
+          Duplicate / ..." bar at the top of this page). */}
+      <div className="no-print" style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <button className="sa-btn" onClick={() => setShowBoxPanel(!showBoxPanel)}>
+          Boxes {boxes.length > 0 ? `(${boxes.length})` : ""} {showBoxPanel ? "▴" : "▾"}
+        </button>
+        <button className="sa-btn" onClick={() => setShowShortcutsPanel(!showShortcutsPanel)}>
+          ⌨ Shortcuts {showShortcutsPanel ? "▴" : "▾"}
+        </button>
+        {active.channels.length > 1 && (
+          <button className="sa-btn" onClick={sortByGroup}
+            title="Arrange in console order: drums → perc → bass → guitars → keys → strings/horns → vocals → playback">
+            Sort by group
+          </button>
+        )}
+      </div>
+
+      {showBoxPanel && (
+        <div className="no-print" style={{ background: "#17181c", border: "1px solid #2c2f37", borderRadius: 8, padding: 12 }}>
+          <div className="sa-sub" style={{ marginBottom: 10, fontSize: 12 }}>
+            Named, colored groupings for patch/routing — e.g. lettered sub-snakes (A, B, C…) or
+            physical locations (SL, Pit, Local). Assign a channel to one in the input list below.
+          </div>
+          {boxes.map((b) => (
+            <div key={b.id} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+              <div style={{ position: "relative" }}>
+                <button type="button" className="sa-strip" style={{ background: b.color, border: "none" }}
+                  title="Box color"
+                  onClick={() => setOpenColorPickerId(openColorPickerId === `box-${b.id}` ? null : `box-${b.id}`)} />
+                {openColorPickerId === `box-${b.id}` && (
+                  <>
+                    <div className="sa-swatch-overlay" onClick={() => setOpenColorPickerId(null)} />
+                    <div className="sa-swatch-popover">
+                      <ColorSwatchPicker value={b.color}
+                        onChange={(hex) => updateBox(b.id, { color: hex })}
+                        onClose={() => setOpenColorPickerId(null)} />
+                    </div>
+                  </>
+                )}
+              </div>
+              <input className="sa-input" style={{ width: 120 }} value={b.name}
+                placeholder="A" onChange={(e) => updateBox(b.id, { name: e.target.value })} />
+              <select className="sa-input" style={{ width: 110 }} value={STAGE_POSITIONS.includes(b.position) ? b.position : ""}
+                onChange={(e) => updateBox(b.id, { position: e.target.value })}>
+                <option value="">Position…</option>
+                {STAGE_POSITIONS.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+              <input className="sa-input" style={{ flex: 1, minWidth: 140 }} value={b.description}
+                placeholder="e.g. Drums" onChange={(e) => updateBox(b.id, { description: e.target.value })} />
+              <button className="sa-btn danger" onClick={() => removeBox(b.id)}>✕</button>
+            </div>
+          ))}
+          <button className="sa-btn" onClick={addBox}>+ Add box</button>
+        </div>
+      )}
+
+      {showShortcutsPanel && (
+        <div className="no-print" style={{ background: "#17181c", border: "1px solid #2c2f37", borderRadius: 8, padding: 12, fontSize: 13 }}>
+          <div className="sa-sub" style={{ marginBottom: 8, fontSize: 12 }}>
+            Desktop only — click the ⠿ handle on a row (or any of its fields) to select it, then use:
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 12px" }}>
+            <b>D</b><span>Duplicate the selected row</span>
+            <b>{ALT_KEY_LABEL}{isMac ? "" : " "}↑ / ↓</b><span>Move the selected row up/down</span>
+            <b>Tab / Shift+Tab</b><span>Move between fields</span>
+            <b>Esc</b><span>Close an open color picker</span>
+          </div>
+        </div>
+      )}
+
       {/* Input list */}
       <div className="sa-card">
-        <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-          <h2 className="sa-h2" style={{ flex: 1 }}>Input list — {active.channels.length} channels</h2>
-          <button className="sa-btn no-print" onClick={() => setShowBoxPanel(!showBoxPanel)}>
-            Boxes {boxes.length > 0 ? `(${boxes.length})` : ""} {showBoxPanel ? "▴" : "▾"}
-          </button>
-          {active.channels.length > 1 && (
-            <button className="sa-btn no-print" onClick={sortByGroup}
-              title="Arrange in console order: drums → perc → bass → guitars → keys → strings/horns → vocals → playback">
-              Sort by group
-            </button>
-          )}
-        </div>
-
-        {showBoxPanel && (
-          <div className="no-print" style={{ background: "#17181c", border: "1px solid #2c2f37", borderRadius: 8, padding: 12, marginBottom: 14 }}>
-            <div className="sa-sub" style={{ marginBottom: 10, fontSize: 12 }}>
-              Named, colored groupings for patch/routing — e.g. lettered sub-snakes (A, B, C…) or
-              physical locations (SL, Pit, Local). Assign a channel to one in the input list below.
-            </div>
-            {boxes.map((b) => (
-              <div key={b.id} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
-                <div style={{ position: "relative" }}>
-                  <button type="button" className="sa-strip" style={{ background: b.color, border: "none" }}
-                    title="Box color"
-                    onClick={() => setOpenColorPickerId(openColorPickerId === `box-${b.id}` ? null : `box-${b.id}`)} />
-                  {openColorPickerId === `box-${b.id}` && (
-                    <>
-                      <div className="sa-swatch-overlay" onClick={() => setOpenColorPickerId(null)} />
-                      <div className="sa-swatch-popover">
-                        <ColorSwatchPicker value={b.color}
-                          onChange={(hex) => updateBox(b.id, { color: hex })}
-                          onClose={() => setOpenColorPickerId(null)} />
-                      </div>
-                    </>
-                  )}
-                </div>
-                <input className="sa-input" style={{ width: 70 }} value={b.name}
-                  placeholder="A" onChange={(e) => updateBox(b.id, { name: e.target.value })} />
-                <select className="sa-input" style={{ width: 110 }} value={STAGE_POSITIONS.includes(b.position) ? b.position : ""}
-                  onChange={(e) => updateBox(b.id, { position: e.target.value })}>
-                  <option value="">Position…</option>
-                  {STAGE_POSITIONS.map((p) => <option key={p} value={p}>{p}</option>)}
-                </select>
-                <input className="sa-input" style={{ flex: 1, minWidth: 140 }} value={b.description}
-                  placeholder="e.g. Drums" onChange={(e) => updateBox(b.id, { description: e.target.value })} />
-                <button className="sa-btn danger" onClick={() => removeBox(b.id)}>✕</button>
-              </div>
-            ))}
-            <button className="sa-btn" onClick={addBox}>+ Add box</button>
-          </div>
-        )}
-
+        <h2 className="sa-h2">Input list — {active.channels.length} channels</h2>
         {active.channels.length === 0 ? (
           <div className="sa-empty">Tap instruments above to start the patch.</div>
         ) : (
           <div className="sa-mono">
             <div className="sa-colhead">
               <div></div><div>CH</div><div></div><div>Source</div><div>Mic / DI</div>
-              <div>Stand</div><div>48V</div><div>Notes</div><div>Position</div><div>Stage Box</div><div></div>
+              <div>Stand</div><div>48V</div><div>Notes</div><div>Position</div><div>Stage Box or Physical Outs</div><div></div>
             </div>
             {channelsWithBoxPos.map((c, i) => (
-              <div key={c.id}
+              <div key={c.id} data-channel-id={c.id}
                 className={`sa-ch${overIdx === i && dragIdx !== null ? " drag-over" : ""}${dragIdx === i ? " dragging" : ""}${shortages.some(([k]) => k === c.mic) ? " short-row" : ""}`}
                 title={shortages.some(([k]) => k === c.mic) ? "Over inventory — swap the mic or tag it as a rental" : undefined}
                 onDragOver={(e) => { e.preventDefault(); if (overIdx !== i) setOverIdx(i); }}
                 onDrop={(e) => { e.preventDefault(); dropChannel(dragIdx, i); setDragIdx(null); setOverIdx(null); }}>
-                <div className="sa-handle no-print" title="Drag to reorder" draggable
+                <div className="sa-handle no-print" tabIndex={0}
+                  title="Drag to reorder · click or tab here to select this row for keyboard shortcuts"
+                  draggable
                   onDragStart={(e) => {
                     setDragIdx(i);
                     e.dataTransfer.effectAllowed = "move";
@@ -1826,7 +2502,7 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
                 <div className="sa-chnum">{i + 1}</div>
                 <div style={{ position: "relative" }}>
                   <button type="button" className="sa-strip" style={{ background: channelColor(c), border: "none" }}
-                    title={c.color ? "Channel color — click to change, right-click to reset to group default" : "Channel color — click to override just this row"}
+                    title={c.color ? "Channel color — click to change or reset to the group color (right-click also resets)" : "Channel color — click to override just this row"}
                     onClick={() => setOpenColorPickerId(openColorPickerId === c.id ? null : c.id)}
                     onContextMenu={(e) => { e.preventDefault(); updateChannel(c.id, { color: null }); }} />
                   {openColorPickerId === c.id && (
@@ -1835,13 +2511,18 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
                       <div className="sa-swatch-popover">
                         <ColorSwatchPicker value={channelColor(c)}
                           onChange={(hex) => updateChannel(c.id, { color: hex })}
+                          onReset={c.color ? () => updateChannel(c.id, { color: null }) : undefined}
                           onClose={() => setOpenColorPickerId(null)} />
                       </div>
                     </>
                   )}
                 </div>
-                <input value={c.name} onChange={(e) => updateChannel(c.id, { name: e.target.value })} />
+                <div className="m-namewrap">
+                  <span className="sa-fieldlabel">Source</span>
+                  <input value={c.name} onChange={(e) => updateChannel(c.id, { name: e.target.value })} />
+                </div>
                 <div className="sa-micwrap">
+                  <span className="sa-fieldlabel">Mic / DI</span>
                   <select
                     value={MIC_OPTIONS.includes(c.mic) ? c.mic : RENTAL}
                     onChange={(e) => {
@@ -1933,9 +2614,9 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
                   )}
                 </div>
                 <div className="sa-rowbtns no-print">
-                  <button title="Duplicate" onClick={() => duplicateChannel(c.id)}>⧉</button>
-                  <button title="Move up" onClick={() => moveChannel(i, -1)}>↑</button>
-                  <button title="Move down" onClick={() => moveChannel(i, 1)}>↓</button>
+                  <button title="Duplicate — press D" onClick={() => duplicateChannel(c.id)}>⧉</button>
+                  <button title={`Move up (${ALT_KEY_LABEL}${isMac ? "" : " "}↑)`} onClick={() => moveChannel(i, -1)}>↑</button>
+                  <button title={`Move down (${ALT_KEY_LABEL}${isMac ? "" : " "}↓)`} onClick={() => moveChannel(i, 1)}>↓</button>
                   <button title="Remove" onClick={() => removeChannel(c.id)}>✕</button>
                 </div>
               </div>
@@ -1955,6 +2636,218 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
       {sbDupes.length > 0 && (
         <div className="sa-shortbanner">
           ⚠ Box conflicts: {sbDupes.map(([, label, chs]) => `${label} claimed by CH ${chs.join(" & ")}`).join(" · ")}. Reassign so each box line has one channel.
+        </div>
+      )}
+
+      {/* Outputs — same row conventions as the input list above:
+          Add/Duplicate/Move/Remove, drag handle, Alt+↑↓ and D shortcuts,
+          its own box pool defaulting to "Local". */}
+      <div className="no-print" style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <button className="sa-btn" onClick={() => setShowOutputBoxPanel(!showOutputBoxPanel)}>
+          Output Boxes {outputBoxes.length > 0 ? `(${outputBoxes.length})` : ""} {showOutputBoxPanel ? "▴" : "▾"}
+        </button>
+      </div>
+
+      {showOutputBoxPanel && (
+        <div className="no-print" style={{ background: "#17181c", border: "1px solid #2c2f37", borderRadius: 8, padding: 12 }}>
+          <div className="sa-sub" style={{ marginBottom: 10, fontSize: 12 }}>
+            Named, colored patch destinations for outputs — e.g. AES, Dante, a specific snake.
+            Anything not assigned to one of these defaults to "Local" (the console's own analog outs).
+          </div>
+          {outputBoxes.map((b) => (
+            <div key={b.id} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+              <div style={{ position: "relative" }}>
+                <button type="button" className="sa-strip" style={{ background: b.color, border: "none" }}
+                  title="Box color"
+                  onClick={() => setOpenColorPickerId(openColorPickerId === `outbox-${b.id}` ? null : `outbox-${b.id}`)} />
+                {openColorPickerId === `outbox-${b.id}` && (
+                  <>
+                    <div className="sa-swatch-overlay" onClick={() => setOpenColorPickerId(null)} />
+                    <div className="sa-swatch-popover">
+                      <ColorSwatchPicker value={b.color}
+                        onChange={(hex) => updateOutputBox(b.id, { color: hex })}
+                        onClose={() => setOpenColorPickerId(null)} />
+                    </div>
+                  </>
+                )}
+              </div>
+              <input className="sa-input" style={{ width: 150 }} value={b.name}
+                placeholder="AES" onChange={(e) => updateOutputBox(b.id, { name: e.target.value })} />
+              <select className="sa-input" style={{ width: 110 }} value={STAGE_POSITIONS.includes(b.position) ? b.position : ""}
+                onChange={(e) => updateOutputBox(b.id, { position: e.target.value })}>
+                <option value="">Position…</option>
+                {STAGE_POSITIONS.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+              <input className="sa-input" style={{ flex: 1, minWidth: 140 }} value={b.description}
+                placeholder="e.g. Digital snake to FOH" onChange={(e) => updateOutputBox(b.id, { description: e.target.value })} />
+              <button className="sa-btn danger" onClick={() => removeOutputBox(b.id)}>✕</button>
+            </div>
+          ))}
+          <button className="sa-btn" onClick={addOutputBox}>+ Add box</button>
+        </div>
+      )}
+
+      {/* Quick-add chips — same idea as "Add inputs" above, for common
+          buses. Main L/R adds a stereo-linked pair; custom chips are
+          saved per account and reusable across shows. */}
+      <div className="sa-card no-print">
+        <h2 className="sa-h2">Add outputs — tap a common bus</h2>
+        <div className="sa-palette">
+          {DEFAULT_OUTPUT_CHIPS.map((chip) => (
+            <button key={chip.id} className="sa-chip"
+              style={{ background: "#4CC3C9", color: readableTextColor("#4CC3C9") }}
+              title={chip.stereo ? "Adds a stereo-linked L + R pair (unlink either time from the row)" : undefined}
+              onClick={() => addOutputFromChip(chip)}>
+              + {outputChipLabel(chip)}
+            </button>
+          ))}
+          {customOutputChips.map((chip) => (
+            <span key={chip.id} style={{ display: "inline-flex", alignItems: "stretch" }}>
+              <button className="sa-chip"
+                style={{ background: "#4CC3C9", color: readableTextColor("#4CC3C9"), borderRadius: "5px 0 0 5px" }}
+                title={chip.stereo ? "Adds a stereo-linked L + R pair" : undefined}
+                onClick={() => addOutputFromChip(chip)}>
+                + {outputChipLabel(chip)}
+              </button>
+              <button className="sa-chip" title="Remove this custom chip"
+                style={{ background: "#3a9aa0", color: readableTextColor("#3a9aa0"), borderRadius: "0 5px 5px 0", padding: "5px 7px" }}
+                onClick={() => removeCustomOutputChip(chip.id)}>✕</button>
+            </span>
+          ))}
+        </div>
+        <div className="sa-customrow">
+          <span className="sa-label" style={{ margin: 0 }}>Make your own chip</span>
+          <input className="sa-input" style={{ maxWidth: 200 }} value={newChipName}
+            placeholder="e.g. Matrix 1, Drum Fill…"
+            onChange={(e) => setNewChipName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && addCustomOutputChip()} />
+          <label className="sa-check" style={{ margin: 0 }}>
+            <input type="checkbox" checked={newChipStereo} onChange={(e) => setNewChipStereo(e.target.checked)} />
+            Stereo pair (adds L + R, linked)
+          </label>
+          <button className="sa-btn" onClick={addCustomOutputChip}>Save chip</button>
+        </div>
+      </div>
+
+      <div className="sa-card">
+        <h2 className="sa-h2">Outputs — {outputs.length} lines</h2>
+        {outputs.length === 0 ? (
+          <div className="sa-empty">No outputs yet.</div>
+        ) : (
+          <div className="sa-mono">
+            <div className="sa-out-colhead">
+              <div></div><div>#</div><div>Output Channel</div><div>Submix</div>
+              <div>Endpoint</div><div>Notes</div><div>Stage Box or Physical Outs</div><div></div>
+            </div>
+            {outputsWithBoxPos.map((o, i) => {
+              const isLinkedPartner = i > 0 && outputsWithBoxPos[i - 1].linkedDown;
+              // A visible box wrapping the whole pair (not just a thin
+              // divider) so it's unambiguous which two rows are linked —
+              // top half open at the bottom, bottom half open at the top,
+              // together they read as one bracket around both rows.
+              const linkStyle = o.linkedDown
+                ? { border: "2px solid #4E8FD1", borderBottom: "none", borderRadius: "6px 6px 0 0", background: "rgba(78,143,209,.12)" }
+                : isLinkedPartner
+                  ? { border: "2px solid #4E8FD1", borderTop: "none", borderRadius: "0 0 6px 6px", background: "rgba(78,143,209,.12)" }
+                  : undefined;
+              const endpointKnown = endpointItems.some((e) => e.label === o.endpoint);
+              return (
+                <div key={o.id} data-output-id={o.id}
+                  className={`sa-out${outputOverIdx === i && outputDragIdx !== null ? " drag-over" : ""}${outputDragIdx === i ? " dragging" : ""}`}
+                  style={linkStyle}
+                  onDragOver={(e) => { e.preventDefault(); if (outputOverIdx !== i) setOutputOverIdx(i); }}
+                  onDrop={(e) => { e.preventDefault(); dropOutput(outputDragIdx, i); setOutputDragIdx(null); setOutputOverIdx(null); }}>
+                  <div className="sa-handle no-print" tabIndex={0}
+                    title="Drag to reorder · click or tab here to select this row for keyboard shortcuts"
+                    draggable
+                    onDragStart={(e) => {
+                      setOutputDragIdx(i);
+                      e.dataTransfer.effectAllowed = "move";
+                      const row = e.currentTarget.closest(".sa-out");
+                      if (row && e.dataTransfer.setDragImage) e.dataTransfer.setDragImage(row, 20, 18);
+                    }}
+                    onDragEnd={() => { setOutputDragIdx(null); setOutputOverIdx(null); }}>⠿</div>
+                  <div className="sa-chnum">{i + 1}</div>
+                  <input value={o.outputChannel} placeholder="e.g. Main L"
+                    onChange={(e) => updateOutput(o.id, { outputChannel: e.target.value })} />
+                  <div className="m-submixwrap">
+                    <span className="sa-fieldlabel">Submix</span>
+                    <input value={o.submixName} placeholder="e.g. FOH L"
+                      onChange={(e) => updateOutput(o.id, { submixName: e.target.value })} />
+                  </div>
+                  <div className="m-endpointwrap sa-micwrap">
+                    <span className="sa-fieldlabel">Endpoint</span>
+                    <select
+                      value={endpointKnown ? o.endpoint : ENDPOINT_RENTAL}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        updateOutput(o.id, { endpoint: v === ENDPOINT_RENTAL ? "" : v });
+                      }}>
+                      <optgroup label="Your endpoints">
+                        {endpointItems.map((e) => (
+                          <option key={e.label} value={e.label}>{e.label}{e.qty ? ` · own ${e.qty}` : ""}</option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Not in your endpoints">
+                        <option value={ENDPOINT_RENTAL}>Other / type in…</option>
+                      </optgroup>
+                    </select>
+                    {!endpointKnown && (
+                      <input value={o.endpoint} placeholder="e.g. QSC HPR152F" autoFocus={o.endpoint === ""}
+                        onChange={(e) => updateOutput(o.id, { endpoint: e.target.value })} />
+                    )}
+                  </div>
+                  <div className="m-outnotewrap">
+                    <span className="sa-fieldlabel">Notes</span>
+                    <input value={o.notes} placeholder="e.g. 100' XLR run"
+                      onChange={(e) => updateOutput(o.id, { notes: e.target.value })} />
+                  </div>
+                  <div className="m-outsbwrap">
+                    <span className="sa-fieldlabel">Stage box</span>
+                    <select className="sa-input"
+                      style={{
+                        marginBottom: 4, fontWeight: 800,
+                        ...(o.boxId && outputBoxById(o.boxId)
+                          ? { background: outputBoxById(o.boxId).color, color: readableTextColor(outputBoxById(o.boxId).color), borderColor: outputBoxById(o.boxId).color }
+                          : {}),
+                      }}
+                      value={o.boxId || ""}
+                      onChange={(e) => updateOutput(o.id, { boxId: e.target.value || null, boxPos: null })}>
+                      <option value="" style={{ background: "#17181c", color: "#e7e6e2" }}>Local (default)</option>
+                      {outputBoxes.map((b) => (
+                        <option key={b.id} value={b.id} style={{ background: b.color, color: readableTextColor(b.color) }}>{b.name}</option>
+                      ))}
+                    </select>
+                    <select
+                      className={`sa-sb m-sb${outputDupeSet.has(`${o._boxId}:${o._boxPos}`) ? " dupe" : o.boxPos != null ? " override" : ""}`}
+                      title="Position within this box (defaults to order in the list)"
+                      value={o.boxPos ?? ""}
+                      onChange={(e) => updateOutput(o.id, { boxPos: e.target.value === "" ? null : Number(e.target.value) })}>
+                      <option value="">{o._boxPos} ·auto</option>
+                      {Array.from({ length: 48 }, (_, n) => n + 1).map((n) => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                  </div>
+                  <div className="sa-rowbtns no-print">
+                    <button title="Link with next row as a stereo pair" disabled={i === outputsWithBoxPos.length - 1 && !o.linkedDown}
+                      className={o.linkedDown ? "sa-link-btn on" : "sa-link-btn"}
+                      onClick={() => toggleOutputLink(o.id)}>⛓</button>
+                    <button title="Duplicate — press D" onClick={() => duplicateOutput(o.id)}>⧉</button>
+                    <button title={`Move up (${ALT_KEY_LABEL}${isMac ? "" : " "}↑)`} onClick={() => moveOutput(i, -1)}>↑</button>
+                    <button title={`Move down (${ALT_KEY_LABEL}${isMac ? "" : " "}↓)`} onClick={() => moveOutput(i, 1)}>↓</button>
+                    <button title="Remove" onClick={() => removeOutput(o.id)}>✕</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <button className="sa-btn no-print" style={{ marginTop: 14 }} onClick={addOutput}>+ Add output</button>
+      </div>
+
+      {/* Duplicate output box position warning */}
+      {outputDupes.length > 0 && (
+        <div className="sa-shortbanner">
+          ⚠ Box conflicts: {outputDupes.map(([, label, os]) => `${label} claimed by output ${os.join(" & ")}`).join(" · ")}. Reassign so each box line has one output.
         </div>
       )}
 
@@ -1999,51 +2892,69 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
   );
 
   /* ————————————————— PRINT SHEET (crew handout) ————————————————— */
-  const renderPrintSheet = () => (
+  /* The show header lives inside each section's <thead> so it repeats on
+     every printed page (same approach as the standalone crew sheet in
+     buildPrintHTML). Order: input list → output list → gear pull, each
+     new section starting on its own page. */
+  const renderPrintSheet = () => {
+    const psHeader = (label, colSpan) => (
+      <tr>
+        <td className="ps-hdr" colSpan={colSpan}>
+          <div className="ps-head">
+            <div className="ps-band">{active.band || "Untitled show"}</div>
+            <div className="ps-brand">{label} · StageAdvance</div>
+          </div>
+          <div className="ps-meta">
+            {active.date && <div><b>Date</b>{active.date}</div>}
+            {active.venue && <div><b>Venue</b>{active.venue}</div>}
+            {active.contact && <div><b>Band contact</b>{active.contact}</div>}
+            {active.monitors && <div><b>Monitors</b>{active.monitors}</div>}
+            <div><b>Channels</b>{active.channels.length}</div>
+            {outputsWithBoxPos.length > 0 && <div><b>Outputs</b>{outputsWithBoxPos.length}</div>}
+          </div>
+        </td>
+      </tr>
+    );
+    const shortageAlertEl = shortages.length > 0 && (
+      <div className="ps-alert">
+        ⚠ OVER INVENTORY: {shortages.map(([k, v]) => `${k} — need ${v}, own ${inventory[k]}`).join(" · ")}
+      </div>
+    );
+
+    return (
     <div className="print-sheet">
-      <div className="ps-head">
-        <div className="ps-band">{active.band || "Untitled show"}</div>
-        <div className="ps-brand">Input List · StageAdvance</div>
-      </div>
-      <div className="ps-meta">
-        {active.date && <div><b>Date</b>{active.date}</div>}
-        {active.venue && <div><b>Venue</b>{active.venue}</div>}
-        {active.contact && <div><b>Band contact</b>{active.contact}</div>}
-        {active.monitors && <div><b>Monitors</b>{active.monitors}</div>}
-        <div><b>Channels</b>{active.channels.length}</div>
-      </div>
-
-      {shortages.length > 0 && (
-        <div className="ps-alert">
-          ⚠ OVER INVENTORY: {shortages.map(([k, v]) => `${k} — need ${v}, own ${inventory[k]}`).join(" · ")}
-        </div>
-      )}
-
-      {sbDupes.length > 0 && (
-        <div className="ps-alert">
-          ⚠ BOX CONFLICTS: {sbDupes.map(([, label, chs]) => `${label} → CH ${chs.join(" & ")}`).join(" · ")}
-        </div>
-      )}
-
       <table className="ps-table">
         <thead>
+          {psHeader("Input List", 8)}
           <tr>
             <th>CH</th><th>Source</th><th>Mic / DI</th><th>Stand</th>
             <th style={{ textAlign: "center" }}>48V</th><th>Notes</th>
             <th>Position</th>
-            <th>Stage Box</th>
+            <th>Stage Box or Physical Outs</th>
           </tr>
         </thead>
         <tbody>
+          {(shortages.length > 0 || sbDupes.length > 0) && (
+            <tr>
+              <td className="ps-nb" colSpan={8}>
+                {shortageAlertEl}
+                {sbDupes.length > 0 && (
+                  <div className="ps-alert">
+                    ⚠ BOX CONFLICTS: {sbDupes.map(([, label, chs]) => `${label} → CH ${chs.join(" & ")}`).join(" · ")}
+                  </div>
+                )}
+              </td>
+            </tr>
+          )}
           {channelsWithBoxPos.map((c, i) => (
             <tr key={c.id}>
               <td className="ps-num">{i + 1}</td>
-              <td>
+              <td style={{ whiteSpace: "nowrap" }}>
                 <span className="ps-swatch" style={{ background: channelColor(c) }} />
                 {c.name}
               </td>
               <td>{c.mic}{isRental(c.mic) ? " (RENTAL)" : ""}</td>
-              <td>{c.stand === "None" ? "—" : c.stand}</td>
+              <td style={{ whiteSpace: "nowrap" }}>{c.stand === "None" ? "—" : c.stand}</td>
               <td className="ps-48">{c.phantom ? "48V" : ""}</td>
               <td>{c.note}</td>
               <td>{c.position || ""}</td>
@@ -2058,34 +2969,6 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
         </tbody>
       </table>
 
-      <div className="ps-cols">
-        <div className="ps-col">
-          <div className="ps-h">Mic pull</div>
-          {micCounts.map(([k, v]) => (
-            <div key={k} className="ps-line">
-              <span>{k}{isRental(k) ? " (RENTAL)" : ""}</span>
-              <b>{v}{inventory[k] !== undefined ? ` / ${inventory[k]}` : ""}</b>
-            </div>
-          ))}
-        </div>
-        <div className="ps-col">
-          <div className="ps-h">Stands</div>
-          {standCounts.map(([k, v]) => (
-            <div key={k} className="ps-line"><span>{k}</span><b>{v}</b></div>
-          ))}
-        </div>
-        <div className="ps-col">
-          <div className="ps-h">Phantom channels</div>
-          <div style={{ fontSize: "10pt", fontWeight: 800, padding: "2px 0" }}>
-            {phantomCh.length ? phantomCh.join(", ") : "none"}
-          </div>
-          <div className="ps-h" style={{ marginTop: 8 }}>XLR lines</div>
-          <div style={{ fontSize: "10pt", fontWeight: 800, padding: "2px 0" }}>
-            {active.channels.length} + monitors
-          </div>
-        </div>
-      </div>
-
       {active.notes && (
         <>
           <div className="ps-h">Advance notes</div>
@@ -2093,12 +2976,93 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
         </>
       )}
 
+      {outputsWithBoxPos.length > 0 && (
+        <div style={{ breakBefore: "page", pageBreakBefore: "always" }}>
+          <table className="ps-table">
+            <thead>
+              {psHeader("Output List", 6)}
+              <tr>
+                <th>#</th><th>Output Channel</th><th>Submix</th><th>Endpoint</th><th>Notes</th><th>Stage Box or Physical Outs</th>
+              </tr>
+            </thead>
+            <tbody>
+              {outputDupes.length > 0 && (
+                <tr>
+                  <td className="ps-nb" colSpan={6}>
+                    <div className="ps-alert">
+                      ⚠ BOX CONFLICTS: {outputDupes.map(([, label, os]) => `${label} → output ${os.join(" & ")}`).join(" · ")}
+                    </div>
+                  </td>
+                </tr>
+              )}
+              {outputsWithBoxPos.map((o, i) => (
+                <tr key={o.id}>
+                  <td className="ps-num">{i + 1}</td>
+                  <td>{o.outputChannel}{o.linkedDown ? " ↓ linked" : ""}</td>
+                  <td>{o.submixName}</td>
+                  <td>{o.endpoint}</td>
+                  <td>{o.notes}</td>
+                  <td style={{ width: "auto" }}>
+                    {o.boxId && outputBoxById(o.boxId) && (
+                      <span className="ps-swatch" style={{ background: outputBoxById(o.boxId).color }} />
+                    )}
+                    {outputBoxLabel(o)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Gear pull: last, on its own page, same repeating header */}
+      <div style={{ breakBefore: "page", pageBreakBefore: "always" }}>
+        <table className="ps-table">
+          <thead>{psHeader("Gear Pull", 1)}</thead>
+          <tbody>
+            <tr>
+              <td className="ps-nb">
+                {shortageAlertEl}
+                <div className="ps-cols">
+                  <div className="ps-col">
+                    <div className="ps-h">Mic pull</div>
+                    {micCounts.map(([k, v]) => (
+                      <div key={k} className="ps-line">
+                        <span>{k}{isRental(k) ? " (RENTAL)" : ""}</span>
+                        <b>{v}{inventory[k] !== undefined ? ` / ${inventory[k]}` : ""}</b>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="ps-col">
+                    <div className="ps-h">Stands</div>
+                    {standCounts.map(([k, v]) => (
+                      <div key={k} className="ps-line"><span>{k}</span><b>{v}</b></div>
+                    ))}
+                  </div>
+                  <div className="ps-col">
+                    <div className="ps-h">Phantom channels</div>
+                    <div style={{ fontSize: "10pt", fontWeight: 800, padding: "2px 0" }}>
+                      {phantomCh.length ? phantomCh.join(", ") : "none"}
+                    </div>
+                    <div className="ps-h" style={{ marginTop: 8 }}>XLR lines</div>
+                    <div style={{ fontSize: "10pt", fontWeight: 800, padding: "2px 0" }}>
+                      {active.channels.length} + monitors
+                    </div>
+                  </div>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
       <div className="ps-foot">
         <span>Printed {new Date().toLocaleDateString()}</span>
         <span>Mic pull shows need / owned · RENTAL items must be sourced before load-in</span>
       </div>
     </div>
-  );
+    );
+  };
 
   /* ————————————————— render ————————————————— */
   return (
@@ -2108,18 +3072,20 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
         <div className="sa-head">
           <div>
             <div className="sa-logo">Stage<span>Advance</span></div>
-            <div className="sa-sub">input lists · mic pulls · stand counts — before you load the van</div>
+            <div className="sa-sub">input lists · output lists · mic pulls · stand counts — before you load the van</div>
           </div>
           {!isPrivacyRoute && !isRequestAccessRoute && !isLoginRoute && !standalone && user && (
             <div className="sa-tabs no-print" style={{ alignItems: "center" }}>
               <div className="sa-sub" style={{ marginRight: 4 }}>Signed in as {user.email}</div>
               <button className={`sa-tab${mode === "plan" ? " on" : ""}`} onClick={() => setMode("plan")}>Planner</button>
-              <button className={`sa-tab${mode === "locker" ? " on" : ""}`} onClick={() => setMode("locker")}>Locker</button>
+              <button className={`sa-tab${mode === "locker" ? " on" : ""}`} onClick={() => setMode("locker")}>Inventory</button>
               <button className={`sa-tab${mode === "form" ? " on" : ""}`} onClick={() => { setMode("form"); setFormDone(false); }}>Band Form</button>
               <button className={`sa-tab${mode === "settings" ? " on" : ""}`} onClick={() => setMode("settings")}>Settings</button>
               {isAdmin && (
                 <button className={`sa-tab${mode === "admin-requests" ? " on" : ""}`} onClick={() => setMode("admin-requests")}>Requests</button>
               )}
+              <a className="sa-tab" href="https://ko-fi.com/stageadvance" target="_blank" rel="noopener noreferrer"
+                title="Support StageAdvance on Ko-fi">☕ Support</a>
               <button className="sa-tab" onClick={signOut}>Sign out</button>
             </div>
           )}
@@ -2146,7 +3112,7 @@ ${active.notes ? `<div class="h">Advance notes</div><div class="notes">${esc(act
         ) : !standalone && accountDeleted ? (
           <div className="sa-card" style={{ maxWidth: 480, margin: "60px auto", textAlign: "center", padding: 32 }}>
             <h2 className="sa-h2">Your account has been deleted</h2>
-            <div className="sa-sub">Your login, shows, locker, and inbox have all been permanently removed.</div>
+            <div className="sa-sub">Your login, shows, inventory, and inbox have all been permanently removed.</div>
           </div>
         ) : !standalone && authLoading ? (
           <div className="sa-sub" style={{ textAlign: "center", margin: 60 }}>Loading…</div>

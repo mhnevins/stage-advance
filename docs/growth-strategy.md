@@ -84,6 +84,73 @@ desktop and mobile widths, both clean. Michael reviewed and approved
 as good enough for now — **copy tweaks explicitly deferred**, not
 forgotten; revisit before this ever goes live for real.
 
+**Pre-deploy checklist (confirmed 2026-09-23), all bundled into one
+future push together — not separate deploys:**
+1. Update the landing page to reflect the new Outputs section (feature
+   grid + copy) — **partly done (2026-09-25):** hero headline now
+   "Input lists, output lists and mic pulls, without the spreadsheet,"
+   subhead and the site-wide tagline mention output lists, "locker"
+   wording became "inventory" where generic, and the testimonial
+   placeholder was replaced with a stack of unattributed quote cards
+   under "What our pre-launch users are saying" (4 so far, more may
+   follow — they live in the `TESTIMONIALS` array in `Landing.jsx`).
+   **Update (2026-09-25, later):** the hero now shows the real input
+   list screenshot (`public/screenshots/input-list.png`,
+   `ScreenshotPlaceholder` gained a `src` prop for real images); the
+   feature grid grew to 9 cards (added Output lists, Built for speed,
+   Fits your spreadsheet workflow; print card updated); step 3 copy
+   mentions output lists; and a new "Plan your outputs the same way"
+   section was added. **All three landing-page screenshots are now
+   real (2026-09-25):** `input-list.png` (hero), `outputs.png` (Outputs
+   section), `print-crew-sheet.png` (How it works) in
+   `public/screenshots/` — no dashed placeholders remain.
+   **Hero replaced with a device showcase (2026-09-27):** Michael
+   wanted a "works across desktop/tablet/mobile" trio image, like a
+   typical marketing device-mockup shot. No image-generation tool is
+   available in this session, so built `DeviceShowcase.jsx` instead —
+   flat, CSS-drawn frames (not photorealistic) showing three real
+   screenshots (input-list.png / outputs.png / a new
+   mobile-outputs.png) staggered like a device trio. Verified at both
+   desktop and phone widths. **Repositioned
+   (2026-09-27):** Michael felt it shouldn't lead the page over the
+   full-size input list image ("the last input list image is more
+   powerful"). Hero reverted to the single input-list screenshot; the
+   device trio now lives in its own "Works wherever the show is"
+   section right after the feature grid, before "Plan your outputs the
+   same way".
+   **"How it works" steps (2026-09-25):** now 1 Build your inventory,
+   2 **Plan your show** (where users will spend most of their time),
+   3 Print your sheets. The Band Form step was dropped from this list —
+   it's covered by the "One link for every band" feature card. **Add a
+   Band Form screenshot to the landing page when Phase 6 (form
+   customization) ships.**
+   **Deploy-day extras:** favicon (pre-authorized RealFaviconGenerator
+   instructions, in memory), and the Supabase Site URL / Netlify
+   billing / env-var checks listed in chat on 2026-09-25.
+2. Update the user guide's content, then host it at `/guide` (queued
+   since 2026-09-17, deliberately held off — see `project_phase1_status.md`).
+   **Add a step-by-step "How to set up your show" walkthrough** (Michael,
+   2026-09-25) — a guided sequence from an empty account through a
+   finished, printable show (locker → endpoints → show details → inputs
+   → boxes/position → outputs → print/export), not just per-feature
+   reference. Also fold in the keyboard shortcuts (queued earlier).
+   **Terminology (2026-09-25):** the main-nav "Locker" tab was renamed
+   **"Inventory"** — "locker" is only right for microphones, so it
+   stays as the name of the mic section on that page ("Your locker")
+   to tell it apart from "Your endpoints". The guide, landing page, and
+   any future copy should say "Inventory" for the tab/page and keep
+   "locker" for mics only.
+3. Ko-fi link — live on the landing page. **Extended (2026-09-27,
+   Michael's idea):** added to the app itself too, since signed-in
+   users rarely see the logged-out landing page and are the ones most
+   likely to actually value it enough to donate. Two spots: a small
+   "☕ Support" link in the main nav tab bar (next to Sign out), and a
+   full "Support StageAdvance" card in Settings (same copy as the
+   landing page). Not yet click-tested in a real session.
+4. Real screenshots for the landing page's two `ScreenshotPlaceholder`
+   spots — Michael's own action item, timing his call, hand them over
+   whenever ready.
+
 ## 4. Access control & feature tiers
 
 **Status (2026-09-17): built and confirmed working locally**, except
@@ -179,9 +246,31 @@ feature tiers.
 - Ties into promotion: gives beta users and prospective users a reason
   to check back, and a public artifact to point people to instead of
   "trust me, it's under active development."
+- **Source material ready when this gets picked up (2026-09-23):** a
+  full build-log-style list of everything shipped this session (bug
+  fixes, input list improvements, the new Outputs section, growth/
+  access-control work) was written up in chat for Michael's call with
+  Brian. Michael wants an end-user-facing rewrite of it later for real
+  release notes — revisit that chat content as the source when this
+  item gets scoped, rather than reconstructing the list from scratch.
 
 ## 7. Open questions to resolve together
 
+- [ ] **Brian's engineer contacts as the first new testers** (2026-09-25):
+      Brian offered to bring in other engineers to help test. They'd be
+      the first users to come in through the Request Access flow rather
+      than a personal setup — but that flow's Approve + Slack alert
+      aren't verified yet (they need a real deploy), so getting them in
+      is effectively gated on the next push going live.
+- [ ] **New-user intuitiveness interviews** (Michael, 2026-09-25): once
+      there are real new users beyond the current hand-recruited beta
+      group, interview a few of them specifically about how intuitive
+      the app is — where they got stuck, what they didn't discover.
+      Current feedback comes from four experienced engineers who were
+      onboarded personally, so first-impression friction hasn't really
+      been tested yet. Pairs naturally with the "How to set up your
+      show" guide walkthrough (see the pre-deploy checklist above) —
+      the interviews are also how to tell whether that guide works.
 - [ ] Finalize buyer persona(s) — one or more? Still open — needs
       Michael's real answers (current workflow without StageAdvance,
       shows/month, freelance vs. in-house, one persona or two), not
