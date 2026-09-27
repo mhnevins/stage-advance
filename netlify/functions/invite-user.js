@@ -72,14 +72,25 @@ export default async (req) => {
       // genuinely already has a working account (fine, nothing to do),
       // or a stale invite stuck from an earlier attempt that never got
       // completed (e.g. the localhost-redirect bug from 2026-09-28,
-      // which left invited users behind who never actually signed in).
-      // Only the second case should actually block a fresh invite, so
-      // look the user up and decide instead of guessing from the error
-      // text alone. Checking last_sign_in_at, not email_confirmed_at —
-      // inviteUserByEmail marks the email confirmed immediately (that's
-      // Supabase vouching for the address, not the person completing
-      // anything), so that flag can't tell a stale invite apart from a
-      // real account. Never having signed in actually can.
+      // which left invited users behind who never actually reached the
+      // app). Only the second case should actually block a fresh invite,
+      // so look the user up and decide instead of guessing from the
+      // error text alone.
+      //
+      // NOT using last_sign_in_at (tried, confirmed wrong 2026-09-27):
+      // Supabase sets last_sign_in_at the moment the invite link's OTP
+      // is verified server-side — which happens BEFORE the browser
+      // follows redirectTo. So a person who clicked a broken-redirect
+      // link (like the localhost bug) gets last_sign_in_at set even
+      // though they never actually reached the app. That's exactly what
+      // happened to this project's own test account, which is why every
+      // retry since then silently skipped sending anything.
+      //
+      // Using presence of a `profiles` row instead: ensureMyProfile()
+      // (src/lib/profile.js) only runs once useAuth.js sees a real
+      // session inside the actual running app (src/lib/useAuth.js) —
+      // so a profiles row means the app itself genuinely loaded for
+      // this user at least once, not just that a link was clicked.
       // listUsers() returns one page (no pagination handled) — fine at
       // this project's current user count, revisit if that changes.
       const { data: usersPage, error: listErr } = await admin.auth.admin.listUsers();
@@ -96,9 +107,16 @@ export default async (req) => {
           last_sign_in_at: existing.last_sign_in_at,
           email_confirmed_at: existing.email_confirmed_at,
         };
+        const { data: profileRow, error: profileErr } = await admin
+          .from("profiles")
+          .select("id")
+          .eq("id", existing.id)
+          .maybeSingle();
+        debug.profileLookupError = profileErr?.message || null;
+        debug.hasProfile = Boolean(profileRow);
       }
 
-      if (existing && !existing.last_sign_in_at) {
+      if (existing && !debug.hasProfile) {
         debug.step = "deleting-stale-user";
         const { error: deleteErr } = await admin.auth.admin.deleteUser(existing.id);
         debug.deleteError = deleteErr?.message || null;
@@ -108,7 +126,7 @@ export default async (req) => {
         debug.retryInviteError = inviteErr?.message || null;
       } else if (existing) {
         debug.step = "treated-as-real-account";
-        inviteErr = null; // has actually signed in before — real account, nothing to send
+        inviteErr = null; // has an actual profiles row — genuinely uses the app, nothing to send
       }
     }
     if (inviteErr) {
