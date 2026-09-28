@@ -64,6 +64,9 @@ export default function PrivacyNotice() {
           <li>To generate and store your input lists, gear pulls, and crew sheets</li>
           <li>To route questionnaire submissions to the correct engineer's inbox</li>
           <li>To let you contact a band using the info they provided</li>
+          <li>To review aggregate usage (e.g. number of shows, feature activity) so we can
+            understand engagement and improve the product — not to read the contents of your
+            shows or submissions beyond what's needed for support</li>
         </ul>
         <p className="sa-sub">
           We do not sell data, use it for advertising, or share it with other engineers

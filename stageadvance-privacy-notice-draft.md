@@ -59,6 +59,9 @@ engineers on the platform.
 - To generate and store your input lists, gear pulls, and crew sheets
 - To route questionnaire submissions to the correct engineer's inbox
 - To let you contact a band using the info they provided
+- To review aggregate usage (e.g. number of shows, feature activity) so we can
+  understand engagement and improve the product — not to read the contents of
+  your shows or submissions beyond what's needed for support
 
 We do not sell data, use it for advertising, or share it with other engineers
 or bands beyond what's described above.
