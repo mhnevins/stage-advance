@@ -500,6 +500,8 @@ export default function StageAdvance() {
   const [formOwner, setFormOwner] = useState(null);
   const [formOwnerStatus, setFormOwnerStatus] = useState(formSlug ? "loading" : "n/a");
   const saveTimer = useRef(null);
+  const showsUpdatedAtRef = useRef(null); // last-known kv_user.updated_at for the shows blob — see setIfUnchanged
+  const [showsConflict, setShowsConflict] = useState(false);
   const fileInputRef = useRef(null);
   const endpointFileInputRef = useRef(null);
 
@@ -666,11 +668,13 @@ export default function StageAdvance() {
   /* ——— load shows + inventory (personal, per signed-in user) ——— */
   useEffect(() => {
     if (!user) { setShows([]); setInventoryItems([]); setEndpointItems([]); setGroupColors({}); setCustomOutputChips([]); setLoaded(false); return; }
+    setShowsConflict(false);
     (async () => {
       try {
         const r = await storage.get(STORAGE_KEY);
         if (r?.value) setShows(JSON.parse(r.value));
         else setShows([]);
+        showsUpdatedAtRef.current = r?.updatedAt ?? null;
       } catch (e) { setShows([]); }
       setLoaded(true);
     })();
@@ -702,16 +706,26 @@ export default function StageAdvance() {
   const groupTextColor = (g) => (groupColors[g] ? readableTextColor(groupColors[g]) : GROUPS[g]?.text || "#e7e6e2");
   const channelColor = (c) => c.color || groupColor(c.group);
 
-  /* ——— save shows (debounced) ——— */
+  /* ——— save shows (debounced) ———
+     Conditional write, not a blind upsert (see storage.js setIfUnchanged
+     — fixed 2026-09-29 after a real report of shows silently vanishing).
+     A stale tab/device — one that loaded this list before a newer write
+     landed elsewhere — must never win a save race and clobber that
+     newer copy. If our last-known updated_at doesn't match the row's
+     current one, someone else wrote in the meantime: stop autosaving
+     and tell the user to reload, rather than silently overwriting. */
   useEffect(() => {
-    if (!loaded) return;
+    if (!loaded || showsConflict) return;
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async () => {
-      try { await storage.set(STORAGE_KEY, JSON.stringify(shows)); }
-      catch (e) { console.error("save failed", e); }
+      try {
+        const result = await storage.setIfUnchanged(STORAGE_KEY, JSON.stringify(shows), showsUpdatedAtRef.current);
+        if (result.ok) showsUpdatedAtRef.current = result.updatedAt;
+        else setShowsConflict(true);
+      } catch (e) { console.error("save failed", e); }
     }, 500);
     return () => clearTimeout(saveTimer.current);
-  }, [shows, loaded]);
+  }, [shows, loaded, showsConflict]);
 
   /* ——— submissions (this engineer's inbox) ——— */
   const loadSubmissions = async () => {
@@ -3090,6 +3104,13 @@ ${gearSection}
     <div className="sa-root">
       <style>{css}</style>
       <div className={`sa-wrap${active ? " screen-only" : ""}`}>
+        {showsConflict && !standalone && user && (
+          <div className="sa-shortbanner no-print" style={{ marginBottom: 14, fontWeight: 700 }}>
+            Your shows were updated in another tab or device since this page loaded. To avoid
+            overwriting those changes, further edits here won't be saved — please reload this page
+            before continuing.
+          </div>
+        )}
         <div className="sa-head">
           <div>
             <div className="sa-logo">Stage<span>Advance</span></div>
