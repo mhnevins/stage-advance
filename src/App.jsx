@@ -501,6 +501,7 @@ export default function StageAdvance() {
   const [formOwnerStatus, setFormOwnerStatus] = useState(formSlug ? "loading" : "n/a");
   const saveTimer = useRef(null);
   const showsUpdatedAtRef = useRef(null); // last-known kv_user.updated_at for the shows blob — see setIfUnchanged
+  const skipNextShowsSaveRef = useRef(false); // true right after a (re)load — loading isn't an edit, don't save it back
   const [showsConflict, setShowsConflict] = useState(false);
   const fileInputRef = useRef(null);
   const endpointFileInputRef = useRef(null);
@@ -665,9 +666,17 @@ export default function StageAdvance() {
   /* the engineer previewing their own form in-app posts to their own profile */
   const effectiveFormOwner = formSlug ? formOwner : profile;
 
-  /* ——— load shows + inventory (personal, per signed-in user) ——— */
+  /* ——— load shows + inventory (personal, per signed-in user) ———
+     Skipped entirely on routes that don't show any of this data (the
+     Guide, Privacy Notice, Request Access, and the standalone Band
+     Form) — found 2026-09-30: simply opening one of these in a new tab
+     was enough to load-then-immediately-resave the shows blob, bumping
+     its updated_at and manufacturing a false "changed elsewhere"
+     conflict in a completely unrelated, legitimate tab. No point
+     touching this data at all on a page that never displays it. */
+  const isStaticRoute = isPrivacyRoute || isGuideRoute || isRequestAccessRoute || standalone;
   useEffect(() => {
-    if (!user) { setShows([]); setInventoryItems([]); setEndpointItems([]); setGroupColors({}); setCustomOutputChips([]); setLoaded(false); return; }
+    if (!user || isStaticRoute) { setShows([]); setInventoryItems([]); setEndpointItems([]); setGroupColors({}); setCustomOutputChips([]); setLoaded(false); return; }
     setShowsConflict(false);
     (async () => {
       try {
@@ -675,6 +684,7 @@ export default function StageAdvance() {
         if (r?.value) setShows(JSON.parse(r.value));
         else setShows([]);
         showsUpdatedAtRef.current = r?.updatedAt ?? null;
+        skipNextShowsSaveRef.current = true; // the setShows above is a load, not an edit — don't save it back
       } catch (e) { setShows([]); }
       setLoaded(true);
     })();
@@ -713,9 +723,17 @@ export default function StageAdvance() {
      landed elsewhere — must never win a save race and clobber that
      newer copy. If our last-known updated_at doesn't match the row's
      current one, someone else wrote in the meantime: stop autosaving
-     and tell the user to reload, rather than silently overwriting. */
+     and tell the user to reload, rather than silently overwriting.
+
+     skipNextShowsSaveRef guards the specific bug found 2026-09-30: this
+     effect's dependency on `shows` means the *load* itself (setShows in
+     the effect above) looked like an edit and got saved right back,
+     bumping updated_at for no reason and manufacturing false conflicts
+     in other, untouched tabs. Only genuine post-load changes to `shows`
+     should ever reach here. */
   useEffect(() => {
     if (!loaded || showsConflict) return;
+    if (skipNextShowsSaveRef.current) { skipNextShowsSaveRef.current = false; return; }
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async () => {
       try {
@@ -3103,14 +3121,24 @@ ${gearSection}
   return (
     <div className="sa-root">
       <style>{css}</style>
-      <div className={`sa-wrap${active ? " screen-only" : ""}`}>
-        {showsConflict && !standalone && user && (
-          <div className="sa-shortbanner no-print" style={{ marginBottom: 14, fontWeight: 700 }}>
-            Your shows were updated in another tab or device since this page loaded. To avoid
-            overwriting those changes, further edits here won't be saved — please reload this page
-            before continuing.
-          </div>
-        )}
+      {showsConflict && !standalone && user && (
+        <div className="sa-shortbanner no-print"
+          style={{
+            position: "fixed", top: 0, left: 0, right: 0, zIndex: 1000,
+            margin: 0, borderRadius: 0, boxShadow: "0 2px 12px rgba(0,0,0,.4)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            gap: 12, flexWrap: "wrap", padding: "10px 16px",
+          }}>
+          <span style={{ fontWeight: 700 }}>
+            Your shows were updated in another tab or device. To avoid overwriting those changes,
+            further edits here won't be saved.
+          </span>
+          <button className="sa-btn" style={{ flexShrink: 0 }} onClick={() => window.location.reload()}>
+            Load the latest version
+          </button>
+        </div>
+      )}
+      <div className={`sa-wrap${active ? " screen-only" : ""}`} style={showsConflict && !standalone && user ? { paddingTop: 56 } : undefined}>
         <div className="sa-head">
           <div>
             <div className="sa-logo">Stage<span>Advance</span></div>
