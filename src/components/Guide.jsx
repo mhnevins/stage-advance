@@ -46,6 +46,7 @@ export default function Guide() {
           <Jump id="inventory">Inventory</Jump>
           <Jump id="bandform">Band Form</Jump>
           <Jump id="settings">Settings</Jump>
+          <Jump id="backup">Backup &amp; restore</Jump>
           <Jump id="shortcuts">Row shortcuts</Jump>
         </div>
       </div>
@@ -98,6 +99,12 @@ export default function Guide() {
         <Step n={8} title="Hand it off">
           When the list's built, use <b>Copy as text</b>, <b>Export CSV/XLSX</b>, or <b>Print crew
           sheet</b> — whichever your crew actually uses. That's the whole loop.
+        </Step>
+        <Step n={9} title="(Good habit) Keep a backup">
+          Your work saves automatically, but every so often open <b>Settings → Export my data</b> to
+          download a copy of everything — shows, mic locker, endpoints, colors. If a show ever gets
+          deleted by accident, you can bring it back from that file. See{" "}
+          <Jump id="backup">Backup &amp; restore</Jump>.
         </Step>
 
         <div className="sa-sub" style={{ marginTop: 4, borderLeft: "2px solid #E8B93E", paddingLeft: 12 }}>
@@ -253,16 +260,68 @@ export default function Guide() {
           matching whatever convention you already run on your console. Any single channel can
           still be recolored on its own row from the input list; right-click a channel's color
           swatch to reset it back to the group color.</p>
-        <p className="sa-sub"><b>Restore from a backup file</b> — got an export from "Export my data"?
-          Pick it under Settings → Your data and you'll see exactly what would be added back (shows, mic
-          locker, endpoints, colors, output chips) before anything changes. It only adds — nothing is ever
-          deleted, and a show that already exists is never overwritten (a differing one comes back as a
-          separate copy).</p>
-        <p className="sa-sub"><b>Your data</b> — <b>Export my data</b> downloads everything (shows,
-          mic locker, endpoint inventory, channel colors, output chips, band form submissions) as a file you keep. <b>Delete my account</b> removes your login and
-          all of it immediately — no grace period, so it asks you to type <code>DELETE</code> to
-          confirm. See the <a href="/privacy" style={{ color: "inherit" }}>Privacy Notice</a> for
-          what's collected and why.</p>
+        <p className="sa-sub"><b>Your data</b> — <b>Export my data</b> downloads a backup of
+          everything you've set up, and <b>Restore from a backup file</b> brings it back — see{" "}
+          <Jump id="backup">Backup &amp; restore</Jump> below. <b>Delete my account</b> removes your
+          login and all of your data immediately — no grace period, so it asks you to type{" "}
+          <code>DELETE</code> to confirm. See the{" "}
+          <a href="/privacy" style={{ color: "inherit" }}>Privacy Notice</a> for what's collected and why.</p>
+      </div>
+
+      {/* ————————————————— Backup & restore ————————————————— */}
+      <div className="sa-card" id="backup">
+        <h3 className="sa-h2" style={{ fontSize: 17 }}>Backup, restore &amp; using more than one device</h3>
+        <div className="sa-sub" style={{ marginBottom: 10 }}>
+          Your shows, inventory, and colors are stored in your account, not on one computer — so you can
+          use StageAdvance on a laptop, a phone, and a second browser tab, and it's all the same data.
+        </div>
+
+        <p className="sa-sub"><b>Saving is automatic.</b> Changes save a moment after you make them, and
+          immediately when you switch tabs or apps, so there's no Save button to forget.</p>
+
+        <p className="sa-sub"><b>Several tabs or devices at once.</b> Each show is saved on its own, so
+          adding or editing one show in one place can't overwrite a different show somewhere else. If you
+          ever change the <i>same</i> show in two places at the same time, StageAdvance won't guess which
+          version wins — you'll see a bar across the top of the page:</p>
+        <ul className="sa-sub">
+          <li><b>"A show was changed or deleted in another tab or device…"</b> — click{" "}
+            <b>Load the latest version</b> and the page reloads with the current data. Everything already
+            saved is safe — this just stopped your older copy from overwriting the newer one. Any edit you
+            make in that tab <i>after</i> the bar appears isn't saved, so redo it once the page has reloaded.</li>
+          <li><b>"Couldn't save your latest changes — check your connection."</b> — usually a dropped
+            connection. Keep working; it retries on its own and the bar goes away once it's saved.</li>
+          <li><b>"We couldn't load your shows."</b> — nothing has changed; click <b>Reload</b> to try again.</li>
+        </ul>
+        <p className="sa-sub">Channel colors and custom output chips merge the same way: if you change one
+          group's color on your laptop and a different one on your phone, both changes stick.</p>
+
+        <p className="sa-sub"><b>Back up</b> — in <b>Settings → Your data</b>, click <b>Export my data</b>.
+          You get one file with your shows, mic locker, endpoint inventory, channel colors, and custom
+          output chips (plus any Band Form submissions, for your records). It's worth doing now and then —
+          and before any big cleanup.</p>
+
+        <p className="sa-sub"><b>Restore</b> — under the Export button, click{" "}
+          <b>Restore from a backup file…</b> and pick one of those files:</p>
+        <ul className="sa-sub">
+          <li>You'll see a review list of what's in the file <i>before anything changes</i>. Items that are
+            <b> not in your account</b> are pre-checked; items that <b>differ</b> from what you have now are
+            unchecked until you tick them.</li>
+          <li>Click <b>Restore N selected items</b> and you'll get a summary of what came back.</li>
+          <li>If everything in the file is already in your account, you'll get a green
+            <b> "Nothing to restore"</b> note instead — handy as a quick "is my backup current?" check.</li>
+        </ul>
+
+        <p className="sa-sub"><b>What restore will and won't do.</b> It only <i>adds</i> — nothing is ever
+          deleted. A show is <i>never</i> overwritten: if the backup has a different version of a show you
+          still have, it comes back as a separate copy named "… (restored)", and your current show is left
+          alone. Mics, endpoints, and colors that differ are only replaced if you tick them. Band Form
+          submissions are in the backup file but aren't restored (they're an inbox, and restoring could
+          bring back ones you'd dismissed).</p>
+
+        <div className="sa-sub" style={{ borderLeft: "2px solid #E8B93E", paddingLeft: 12 }}>
+          <b>Deleted a show by mistake?</b> Restore from your most recent export — only the missing show
+          shows up as "not in your account", and ticking just that one brings it back exactly as it was.
+        </div>
       </div>
 
       {/* ————————————————— Shortcuts recap ————————————————— */}
