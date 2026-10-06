@@ -254,7 +254,7 @@ export default function Guide() {
           still be recolored on its own row from the input list; right-click a channel's color
           swatch to reset it back to the group color.</p>
         <p className="sa-sub"><b>Your data</b> — <b>Export my data</b> downloads everything (shows,
-          inventory, submissions) as a file you keep. <b>Delete my account</b> removes your login and
+          mic locker, endpoint inventory, channel colors, output chips, band form submissions) as a file you keep. <b>Delete my account</b> removes your login and
           all of it immediately — no grace period, so it asks you to type <code>DELETE</code> to
           confirm. See the <a href="/privacy" style={{ color: "inherit" }}>Privacy Notice</a> for
           what's collected and why.</p>

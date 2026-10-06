@@ -1,7 +1,9 @@
 /*
  * Per-user key/value storage, backed by the Supabase `kv_user` table
- * (owner_id, key, value) with RLS scoped to auth.uid(). Used for the
- * engineer's own `shows` list.
+ * (owner_id, key, value) with RLS scoped to auth.uid(). Holds small
+ * per-account preferences (channel group colors, custom output chips).
+ * Shows used to live here too, as one big JSON blob — they now have a
+ * real table, see shows.js.
  */
 
 import { requireSupabase } from "./supabaseClient";
@@ -19,13 +21,13 @@ export const storage = {
     if (!ownerId) return null;
     const { data, error } = await supabase
       .from("kv_user")
-      .select("value, updated_at")
+      .select("value")
       .eq("owner_id", ownerId)
       .eq("key", key)
       .maybeSingle();
     if (error) throw error;
     if (!data) return null;
-    return { key, value: data.value, updatedAt: data.updated_at };
+    return { key, value: data.value };
   },
 
   async set(key, value) {
@@ -40,50 +42,54 @@ export const storage = {
   },
 
   /*
-   * Conditional write — guards against the multi-device/multi-tab
-   * clobber bug found 2026-09-29: a tab that loaded a stale copy of
-   * this key must not blindly overwrite a newer copy written elsewhere
-   * in the meantime. `expectedUpdatedAt` is whatever `get()` (or a
-   * prior `setIfUnchanged()`) last reported for this key — pass `null`
-   * only when no row was found yet (a first-ever save).
-   *
-   * Returns { ok: true, updatedAt } on success, or { ok: false } if
-   * someone else's write won the race — the caller must NOT retry with
-   * the same stale data; it should surface that to the user instead.
+   * Read-modify-write against the SERVER's current copy, never this
+   * tab's in-memory one: `mutate(current)` receives the parsed value as
+   * it is right now (undefined if none) and returns the new value. The
+   * write only lands if the stored value is still exactly what we just
+   * read; otherwise someone else wrote in between, so we re-read and
+   * re-apply the same change on top of theirs. Net effect: a change
+   * made in one tab (say, one group's color) is merged with changes
+   * made in other tabs instead of replacing them — a stale tab can no
+   * longer wipe out colors set elsewhere. Returns the merged value that
+   * was saved.
    */
-  async setIfUnchanged(key, value, expectedUpdatedAt) {
+  async update(key, mutate, { retries = 4 } = {}) {
     const supabase = requireSupabase();
     const ownerId = await currentUserId();
     if (!ownerId) throw new Error("Not signed in.");
-    const nowIso = new Date().toISOString();
 
-    if (expectedUpdatedAt == null) {
-      // No row existed as of our last read — plain insert. If another
-      // tab already created this row in the meantime, the (owner_id,
-      // key) primary key collides and we report that as a conflict too,
-      // rather than silently upserting over it.
-      const { data, error } = await supabase
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      const { data: row, error: readErr } = await supabase
         .from("kv_user")
-        .insert({ owner_id: ownerId, key, value, updated_at: nowIso })
-        .select("updated_at")
+        .select("value")
+        .eq("owner_id", ownerId)
+        .eq("key", key)
         .maybeSingle();
-      if (error) {
-        if (error.code === "23505") return { ok: false };
-        throw error;
-      }
-      return { ok: true, updatedAt: data?.updated_at ?? nowIso };
-    }
+      if (readErr) throw readErr;
 
-    const { data, error } = await supabase
-      .from("kv_user")
-      .update({ value, updated_at: nowIso })
-      .eq("owner_id", ownerId)
-      .eq("key", key)
-      .eq("updated_at", expectedUpdatedAt)
-      .select("updated_at");
-    if (error) throw error;
-    if (!data || data.length === 0) return { ok: false };
-    return { ok: true, updatedAt: data[0].updated_at };
+      let current;
+      try { current = row ? JSON.parse(row.value) : undefined; } catch { current = undefined; }
+      const nextValue = JSON.stringify(mutate(current));
+
+      if (!row) {
+        const { error } = await supabase
+          .from("kv_user")
+          .insert({ owner_id: ownerId, key, value: nextValue });
+        if (!error) return JSON.parse(nextValue);
+        if (error.code !== "23505") throw error; // another tab created it first — re-read and merge
+      } else {
+        const { data, error } = await supabase
+          .from("kv_user")
+          .update({ value: nextValue, updated_at: new Date().toISOString() })
+          .eq("owner_id", ownerId)
+          .eq("key", key)
+          .eq("value", row.value) // only if nobody changed it since we read it
+          .select("key");
+        if (error) throw error;
+        if (data && data.length > 0) return JSON.parse(nextValue);
+      }
+    }
+    throw new Error("Couldn't save — please try again.");
   },
 
   async delete(key) {

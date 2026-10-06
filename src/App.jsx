@@ -4,6 +4,8 @@ import { storage } from "./lib/storage";
 import { useAuth } from "./lib/useAuth";
 import { listMyInventory, addInventoryItem, updateInventoryItem, removeInventoryItem } from "./lib/inventory";
 import { listMyEndpoints, addEndpointItem, updateEndpointItem, removeEndpointItem } from "./lib/endpoints";
+import { listMyShows, showsApi } from "./lib/shows";
+import { createShowsSync } from "./lib/showsSync";
 import { lookupMicLibrary, cacheMicLibraryEntry, fetchAiTagsForMic } from "./lib/micLibrary";
 import { resolveOwnerBySlug, updateMyProfile } from "./lib/profile";
 import { exportMyData, deleteMyAccount } from "./lib/account";
@@ -299,7 +301,6 @@ const blankForm = () => ({
   unusual: "", anythingElse: "",
 });
 
-const STORAGE_KEY = "stage-advance:shows";
 const GROUP_COLORS_KEY = "stage-advance:group-colors";
 const OUTPUT_CHIPS_KEY = "stage-advance:output-chips";
 
@@ -449,7 +450,6 @@ export default function StageAdvance() {
   const [inventoryItems, setInventoryItems] = useState([]);
   const [inventoryErr, setInventoryErr] = useState("");
   const [activeId, setActiveId] = useState(null);
-  const [loaded, setLoaded] = useState(false);
   const [copied, setCopied] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   const [printMsg, setPrintMsg] = useState("");
@@ -500,9 +500,28 @@ export default function StageAdvance() {
   const [formOwner, setFormOwner] = useState(null);
   const [formOwnerStatus, setFormOwnerStatus] = useState(formSlug ? "loading" : "n/a");
   const saveTimer = useRef(null);
-  const showsUpdatedAtRef = useRef(null); // last-known kv_user.updated_at for the shows blob — see setIfUnchanged
-  const skipNextShowsSaveRef = useRef(false); // true right after a (re)load — loading isn't an edit, don't save it back
-  const [showsConflict, setShowsConflict] = useState(false);
+  const [showsConflict, setShowsConflict] = useState(false); // a show was changed/deleted elsewhere — see showsSync.js
+  const [showsLoadError, setShowsLoadError] = useState(false);
+  const [saveError, setSaveError] = useState(false);
+  /* Per-show saving lives in showsSync.js (React-free, unit tested).
+     It reads the latest shows through showsRef rather than a stale
+     closure, and is created once per mount. */
+  const showsRef = useRef([]);
+  showsRef.current = shows;
+  const syncRef = useRef(null);
+  if (!syncRef.current) {
+    syncRef.current = createShowsSync({
+      api: showsApi,
+      getShow: (id) => showsRef.current.find((s) => s.id === id),
+      onConflict: () => setShowsConflict(true),
+      onSaveError: (e) => { console.error("save failed", e); setSaveError(true); },
+      onSaveOk: () => setSaveError(false),
+    });
+  }
+  useEffect(() => () => syncRef.current.dispose(), []);
+  const prefsChainRef = useRef(Promise.resolve()); // serializes color/chip saves
+  const pendingColorsRef = useRef({});
+  const colorTimerRef = useRef(null);
   const fileInputRef = useRef(null);
   const endpointFileInputRef = useRef(null);
 
@@ -676,74 +695,100 @@ export default function StageAdvance() {
      touching this data at all on a page that never displays it. */
   const isStaticRoute = isPrivacyRoute || isGuideRoute || isRequestAccessRoute || standalone;
   useEffect(() => {
-    if (!user || isStaticRoute) { setShows([]); setInventoryItems([]); setEndpointItems([]); setGroupColors({}); setCustomOutputChips([]); setLoaded(false); return; }
+    syncRef.current.setBaseline([]);
     setShowsConflict(false);
+    setShowsLoadError(false);
+    setSaveError(false);
+    if (!user || isStaticRoute) { setShows([]); setInventoryItems([]); setEndpointItems([]); setGroupColors({}); setCustomOutputChips([]); return; }
+    let cancelled = false; // a sign-out/sign-in swap must never show the previous account's data
     (async () => {
       try {
-        const r = await storage.get(STORAGE_KEY);
-        if (r?.value) setShows(JSON.parse(r.value));
-        else setShows([]);
-        showsUpdatedAtRef.current = r?.updatedAt ?? null;
-        skipNextShowsSaveRef.current = true; // the setShows above is a load, not an edit — don't save it back
-      } catch (e) { setShows([]); }
-      setLoaded(true);
+        const { shows: list, baseline } = await listMyShows();
+        if (cancelled) return;
+        syncRef.current.setBaseline(baseline);
+        setShows(list);
+      } catch (e) {
+        // Don't pretend the planner is empty — say the load failed. Nothing
+        // can be lost by this: shows are only ever written when edited, and
+        // deleted only on an explicit Delete click.
+        console.error("couldn't load shows", e);
+        if (!cancelled) setShowsLoadError(true);
+      }
     })();
     (async () => {
       try {
         const r = await storage.get(GROUP_COLORS_KEY);
-        setGroupColors(r?.value ? JSON.parse(r.value) : {});
-      } catch (e) { setGroupColors({}); }
+        if (!cancelled) setGroupColors(r?.value ? JSON.parse(r.value) : {});
+      } catch (e) { if (!cancelled) setGroupColors({}); }
     })();
     (async () => {
       try {
         const r = await storage.get(OUTPUT_CHIPS_KEY);
-        setCustomOutputChips(r?.value ? JSON.parse(r.value) : []);
-      } catch (e) { setCustomOutputChips([]); }
+        if (!cancelled) setCustomOutputChips(r?.value ? JSON.parse(r.value) : []);
+      } catch (e) { if (!cancelled) setCustomOutputChips([]); }
     })();
     loadInventory();
     loadEndpoints();
+    return () => { cancelled = true; };
   }, [user]);
 
-  const saveGroupColor = async (group, hex) => {
-    const next = { ...groupColors };
-    if (hex) next[group] = hex; else delete next[group];
-    setGroupColors(next);
-    try { await storage.set(GROUP_COLORS_KEY, JSON.stringify(next)); }
-    catch (e) { console.error("couldn't save group color", e); }
+  /* Colors and chips are small per-account preferences stored as one
+     value each. Saves are read-modify-write against the server's current
+     copy (storage.update), so a change made in this tab merges with
+     changes made in other tabs instead of replacing them — the same
+     stale-tab-overwrite flaw the shows had. Color changes are batched
+     briefly because the native color input fires on every drag step. */
+  const flushColorSaves = () => {
+    const ops = pendingColorsRef.current;
+    pendingColorsRef.current = {};
+    if (!Object.keys(ops).length) return;
+    prefsChainRef.current = prefsChainRef.current.then(async () => {
+      try {
+        const merged = await storage.update(GROUP_COLORS_KEY, (cur) => {
+          const next = { ...(cur || {}) };
+          for (const [g, hex] of Object.entries(ops)) { if (hex) next[g] = hex; else delete next[g]; }
+          return next;
+        });
+        // adopt other tabs' colors too — unless a newer pick is already queued
+        if (!Object.keys(pendingColorsRef.current).length) setGroupColors(merged);
+        setSaveError(false);
+      } catch (e) { console.error("couldn't save group colors", e); setSaveError(true); }
+    });
+  };
+
+  /* Save anything still waiting on its short debounce the moment the tab
+     is hidden (switching tabs/apps, closing, locking a phone), so the
+     last edit before leaving is never the one that gets lost. */
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState !== "hidden") return;
+      syncRef.current.flushNow();
+      clearTimeout(colorTimerRef.current);
+      flushColorSaves();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, []);
+
+  const saveGroupColor = (group, hex) => {
+    setGroupColors((prev) => {
+      const next = { ...prev };
+      if (hex) next[group] = hex; else delete next[group];
+      return next;
+    });
+    pendingColorsRef.current[group] = hex || null;
+    clearTimeout(colorTimerRef.current);
+    colorTimerRef.current = setTimeout(flushColorSaves, 300);
   };
 
   const groupColor = (g) => groupColors[g] || GROUPS[g]?.color || "#999";
   const groupTextColor = (g) => (groupColors[g] ? readableTextColor(groupColors[g]) : GROUPS[g]?.text || "#e7e6e2");
   const channelColor = (c) => c.color || groupColor(c.group);
 
-  /* ——— save shows (debounced) ———
-     Conditional write, not a blind upsert (see storage.js setIfUnchanged
-     — fixed 2026-09-29 after a real report of shows silently vanishing).
-     A stale tab/device — one that loaded this list before a newer write
-     landed elsewhere — must never win a save race and clobber that
-     newer copy. If our last-known updated_at doesn't match the row's
-     current one, someone else wrote in the meantime: stop autosaving
-     and tell the user to reload, rather than silently overwriting.
-
-     skipNextShowsSaveRef guards the specific bug found 2026-09-30: this
-     effect's dependency on `shows` means the *load* itself (setShows in
-     the effect above) looked like an edit and got saved right back,
-     bumping updated_at for no reason and manufacturing false conflicts
-     in other, untouched tabs. Only genuine post-load changes to `shows`
-     should ever reach here. */
-  useEffect(() => {
-    if (!loaded || showsConflict) return;
-    if (skipNextShowsSaveRef.current) { skipNextShowsSaveRef.current = false; return; }
-    clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(async () => {
-      try {
-        const result = await storage.setIfUnchanged(STORAGE_KEY, JSON.stringify(shows), showsUpdatedAtRef.current);
-        if (result.ok) showsUpdatedAtRef.current = result.updatedAt;
-        else setShowsConflict(true);
-      } catch (e) { console.error("save failed", e); }
-    }, 500);
-    return () => clearTimeout(saveTimer.current);
-  }, [shows, loaded, showsConflict]);
+  /* Shows are saved per show by showsSync.js — there is deliberately no
+     "save the whole list whenever it changes" effect any more. That
+     pattern (one blob, saved on any change, including the load itself)
+     is what let a stale tab silently overwrite shows saved elsewhere. */
 
   /* ——— submissions (this engineer's inbox) ——— */
   const loadSubmissions = async () => {
@@ -813,6 +858,7 @@ export default function StageAdvance() {
   const importSubmission = (sub) => {
     const show = submissionToShow(sub);
     setShows((p) => [show, ...p]);
+    syncRef.current.markDirty(show.id);
     removeSubmission(sub.id);
     setActiveId(show.id);
     setInboxMsg("");
@@ -821,8 +867,12 @@ export default function StageAdvance() {
   /* ——— planner logic ——— */
   const active = shows.find((s) => s.id === activeId) || null;
 
-  const updateShow = (patch) =>
-    setShows((prev) => prev.map((s) => (s.id === activeId ? { ...s, ...patch, updated: Date.now() } : s)));
+  const updateShow = (patch) => {
+    const id = activeId;
+    if (!id) return;
+    setShows((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch, updated: Date.now() } : s)));
+    syncRef.current.markDirty(id);
+  };
 
   /* Prefer a locker item actually tagged for this role over the
      hardcoded catalog suggestion — makes presets useful regardless of
@@ -1014,25 +1064,41 @@ export default function StageAdvance() {
     updateShow({ outputs: [...outputs, ...rows] });
   };
 
-  const saveCustomOutputChips = async (next) => {
-    setCustomOutputChips(next);
-    try { await storage.set(OUTPUT_CHIPS_KEY, JSON.stringify(next)); }
-    catch (e) { console.error("couldn't save output chips", e); }
+  /* Merge-safe like the group colors: the change is applied on top of the
+     server's current chip list (storage.update), so chips added in
+     another tab aren't wiped by this tab's older copy. */
+  const updateCustomOutputChips = (optimistic, mutate) => {
+    setCustomOutputChips(optimistic);
+    prefsChainRef.current = prefsChainRef.current.then(async () => {
+      try {
+        const merged = await storage.update(OUTPUT_CHIPS_KEY, (cur) => mutate(Array.isArray(cur) ? cur : []));
+        setCustomOutputChips(merged);
+        setSaveError(false);
+      } catch (e) { console.error("couldn't save output chips", e); setSaveError(true); }
+    });
   };
+  const sameChip = (a, b) => a.name.toLowerCase() === b.name.toLowerCase() && Boolean(a.stereo) === Boolean(b.stereo);
 
   const addCustomOutputChip = () => {
     const name = newChipName.trim();
     if (!name) return;
-    const dupe = [...DEFAULT_OUTPUT_CHIPS, ...customOutputChips].some(
-      (c) => c.name.toLowerCase() === name.toLowerCase() && Boolean(c.stereo) === newChipStereo
-    );
-    if (!dupe) saveCustomOutputChips([...customOutputChips, { id: uid(), name, stereo: newChipStereo }]);
+    const chip = { id: uid(), name, stereo: newChipStereo };
+    const dupe = [...DEFAULT_OUTPUT_CHIPS, ...customOutputChips].some((c) => sameChip(c, chip));
+    if (!dupe) {
+      updateCustomOutputChips(
+        [...customOutputChips, chip],
+        (list) => (list.some((c) => sameChip(c, chip)) ? list : [...list, chip]),
+      );
+    }
     setNewChipName("");
     setNewChipStereo(false);
   };
 
   const removeCustomOutputChip = (chipId) =>
-    saveCustomOutputChips(customOutputChips.filter((c) => c.id !== chipId));
+    updateCustomOutputChips(
+      customOutputChips.filter((c) => c.id !== chipId),
+      (list) => list.filter((c) => c.id !== chipId),
+    );
 
   /* Keyboard shortcuts for the input list and the output list — acts on
      whichever row contains the current keyboard focus (see the
@@ -1080,6 +1146,7 @@ export default function StageAdvance() {
   const deleteShow = (id) => {
     setShows((prev) => prev.filter((s) => s.id !== id));
     if (activeId === id) setActiveId(null);
+    syncRef.current.remove(id); // the ONLY thing that ever deletes a saved show: an explicit click
   };
 
   const duplicateShow = (id) => {
@@ -1094,6 +1161,7 @@ export default function StageAdvance() {
       updated: Date.now(),
     };
     setShows((p) => [copy, ...p]);
+    syncRef.current.markDirty(copy.id);
     setActiveId(copy.id); // open it so the name can be edited right away
   };
 
@@ -1754,7 +1822,7 @@ ${gearSection}
       )}
 
       <button className="sa-btn primary" style={{ alignSelf: "start", width: "fit-content" }}
-        onClick={() => { const s = newShow(); setShows((p) => [s, ...p]); setActiveId(s.id); }}>
+        onClick={() => { const s = newShow(); setShows((p) => [s, ...p]); syncRef.current.markDirty(s.id); setActiveId(s.id); }}>
         + New show
       </button>
       {shows.length === 0 && (
@@ -3117,11 +3185,24 @@ ${gearSection}
     );
   };
 
+  /* One fixed bar at the top for anything the user needs to know about
+     their data. Priority: a conflict (saving is paused), then a failed
+     load, then a failed save (retrying on its own). */
+  const banner = !standalone && user && !isStaticRoute
+    ? showsConflict
+      ? { text: "A show was changed or deleted in another tab or device. To avoid overwriting that, further edits here won't be saved.", button: "Load the latest version" }
+      : showsLoadError
+        ? { text: "We couldn't load your shows. Nothing has been changed — please reload to try again.", button: "Reload" }
+        : saveError
+          ? { text: "Couldn't save your latest changes — check your connection. We'll keep trying." }
+          : null
+    : null;
+
   /* ————————————————— render ————————————————— */
   return (
     <div className="sa-root">
       <style>{css}</style>
-      {showsConflict && !standalone && user && (
+      {banner && (
         <div className="sa-shortbanner no-print"
           style={{
             position: "fixed", top: 0, left: 0, right: 0, zIndex: 1000,
@@ -3129,16 +3210,15 @@ ${gearSection}
             display: "flex", alignItems: "center", justifyContent: "center",
             gap: 12, flexWrap: "wrap", padding: "10px 16px",
           }}>
-          <span style={{ fontWeight: 700 }}>
-            Your shows were updated in another tab or device. To avoid overwriting those changes,
-            further edits here won't be saved.
-          </span>
-          <button className="sa-btn" style={{ flexShrink: 0 }} onClick={() => window.location.reload()}>
-            Load the latest version
-          </button>
+          <span style={{ fontWeight: 700 }}>{banner.text}</span>
+          {banner.button && (
+            <button className="sa-btn" style={{ flexShrink: 0 }} onClick={() => window.location.reload()}>
+              {banner.button}
+            </button>
+          )}
         </div>
       )}
-      <div className={`sa-wrap${active ? " screen-only" : ""}`} style={showsConflict && !standalone && user ? { paddingTop: 56 } : undefined}>
+      <div className={`sa-wrap${active ? " screen-only" : ""}`} style={banner ? { paddingTop: 56 } : undefined}>
         <div className="sa-head">
           <div>
             <div className="sa-logo">Stage<span>Advance</span></div>
@@ -3156,7 +3236,10 @@ ${gearSection}
               )}
               <a className="sa-tab" href="/guide" target="_blank" rel="noopener noreferrer"
                 title="How to use StageAdvance (opens in a new tab)">Guide</a>
-              <button className="sa-tab" onClick={signOut}>Sign out</button>
+              <button className="sa-tab" onClick={async () => {
+                try { await syncRef.current.flushNow(); } catch { /* sign out regardless */ }
+                signOut();
+              }}>Sign out</button>
             </div>
           )}
         </div>

@@ -1,5 +1,8 @@
 -- StageAdvance — per-user usage snapshot
 --
+-- NOTE: counts shows from the `shows` table, so run it only after the
+-- row-per-show migration (docs/shows-migration.md) is done.
+--
 -- Paste this into the Supabase dashboard's SQL Editor (left sidebar →
 -- SQL Editor → New query) and click Run. Read-only (a plain SELECT) —
 -- safe to run any time, doesn't change anything.
@@ -29,13 +32,15 @@ select
   u.last_sign_in_at,
   p.slug as band_form_slug,
   p.display_name,
-  coalesce(jsonb_array_length(nullif(kv.value, '')::jsonb), 0) as shows_count,
+  coalesce(sh.show_count, 0) as shows_count,
   coalesce(inv.mic_count, 0) as mic_locker_items,
   coalesce(ep.endpoint_count, 0) as endpoint_items,
   coalesce(sub.submission_count, 0) as band_form_submissions
 from auth.users u
 left join profiles p on p.id = u.id
-left join kv_user kv on kv.owner_id = u.id and kv.key = 'stage-advance:shows'
+left join (
+  select owner_id, count(*) as show_count from shows group by owner_id
+) sh on sh.owner_id = u.id
 left join (
   select owner_id, count(*) as mic_count from inventory_items group by owner_id
 ) inv on inv.owner_id = u.id

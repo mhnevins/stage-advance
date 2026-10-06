@@ -2,7 +2,7 @@
  * Deletes the calling user's own account, permanently and immediately.
  * Every user-owned table has `references auth.users(id) on delete
  * cascade` (see supabase/migrations/0001_multi_tenant.sql), so removing
- * the auth user here cascades to profiles/kv_user/inventory_items/
+ * the auth user here cascades to profiles/kv_user/shows/inventory_items/
  * submissions automatically — nothing else to clean up.
  *
  * Requires SUPABASE_SERVICE_ROLE_KEY as a Netlify environment variable.
