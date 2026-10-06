@@ -253,6 +253,11 @@ export default function Guide() {
           matching whatever convention you already run on your console. Any single channel can
           still be recolored on its own row from the input list; right-click a channel's color
           swatch to reset it back to the group color.</p>
+        <p className="sa-sub"><b>Restore from a backup file</b> — got an export from "Export my data"?
+          Pick it under Settings → Your data and you'll see exactly what would be added back (shows, mic
+          locker, endpoints, colors, output chips) before anything changes. It only adds — nothing is ever
+          deleted, and a show that already exists is never overwritten (a differing one comes back as a
+          separate copy).</p>
         <p className="sa-sub"><b>Your data</b> — <b>Export my data</b> downloads everything (shows,
           mic locker, endpoint inventory, channel colors, output chips, band form submissions) as a file you keep. <b>Delete my account</b> removes your login and
           all of it immediately — no grace period, so it asks you to type <code>DELETE</code> to

@@ -22,6 +22,7 @@ import { listMyInventory } from "./inventory";
 import { listMyEndpoints } from "./endpoints";
 import { listMyShows } from "./shows";
 import { listMine as listMySubmissions } from "./submissions";
+import { BACKUP_FORMAT, BACKUP_VERSION } from "./restore";
 
 // Must match GROUP_COLORS_KEY / OUTPUT_CHIPS_KEY in App.jsx.
 const GROUP_COLORS_KEY = "stage-advance:group-colors";
@@ -49,6 +50,8 @@ export async function exportMyData() {
   // Everything a user could lose hours of careful setup on goes in here:
   // shows, mic locker, endpoint inventory, and their colors/output chips.
   const data = {
+    format: BACKUP_FORMAT,
+    formatVersion: BACKUP_VERSION,
     exportedAt: new Date().toISOString(),
     profile: profileResult.data,
     inventory,

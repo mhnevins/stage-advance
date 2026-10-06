@@ -6,6 +6,7 @@ import { listMyInventory, addInventoryItem, updateInventoryItem, removeInventory
 import { listMyEndpoints, addEndpointItem, updateEndpointItem, removeEndpointItem } from "./lib/endpoints";
 import { listMyShows, showsApi } from "./lib/shows";
 import { createShowsSync } from "./lib/showsSync";
+import RestoreBackup from "./components/RestoreBackup";
 import { lookupMicLibrary, cacheMicLibraryEntry, fetchAiTagsForMic } from "./lib/micLibrary";
 import { resolveOwnerBySlug, updateMyProfile } from "./lib/profile";
 import { exportMyData, deleteMyAccount } from "./lib/account";
@@ -1099,6 +1100,35 @@ export default function StageAdvance() {
       customOutputChips.filter((c) => c.id !== chipId),
       (list) => list.filter((c) => c.id !== chipId),
     );
+
+  /* Everything "Restore from a backup file" is allowed to do. Note there is
+     deliberately no delete here — restore only ever adds (or, when the
+     user explicitly ticks a "differs" item, replaces that one item). */
+  const restoreDeps = {
+    // list is in display order (top first). Shows are created oldest-first
+    // so that, after a reload (the planner sorts by creation time, newest
+    // first), the restored shows come back in this same order.
+    addShows: (list) => {
+      setShows((p) => [...list, ...p]);
+      [...list].reverse().forEach((sh) => syncRef.current.markDirty(sh.id));
+    },
+    addInventory: (label, qty, tags) => addInventoryItem(label, qty, tags),
+    updateInventory: (id, patch) => updateInventoryItem(id, patch),
+    addEndpoint: (label, qty, type) => addEndpointItem(label, qty, type || null),
+    updateEndpoint: (id, patch) => updateEndpointItem(id, patch),
+    updateColors: async (map) => {
+      const merged = await storage.update(GROUP_COLORS_KEY, (cur) => ({ ...(cur || {}), ...map }));
+      setGroupColors(merged);
+    },
+    addChips: async (chips) => {
+      const merged = await storage.update(OUTPUT_CHIPS_KEY, (cur) => {
+        const list = Array.isArray(cur) ? cur : [];
+        const add = chips.filter((c) => !list.some((x) => sameChip(x, c))).map((c) => ({ id: uid(), name: c.name, stereo: c.stereo }));
+        return [...list, ...add];
+      });
+      setCustomOutputChips(merged);
+    },
+  };
 
   /* Keyboard shortcuts for the input list and the output list — acts on
      whichever row contains the current keyboard focus (see the
@@ -2424,6 +2454,13 @@ ${gearSection}
         <button className="sa-btn" onClick={handleExportData} disabled={exportBusy}>
           {exportBusy ? "Preparing…" : "Export my data"}
         </button>
+        <RestoreBackup
+          current={{ shows, inventoryItems, endpointItems, groupColors, customOutputChips }}
+          validGroups={GROUP_ORDER}
+          blocked={showsConflict || showsLoadError ? "Reload the page first — your shows aren't in sync right now, so a restore couldn't be saved safely." : null}
+          deps={restoreDeps}
+          onRestored={() => { loadInventory(); loadEndpoints(); }}
+        />
       </div>
 
       <div className="sa-card" style={{ borderColor: "#D64545" }}>
