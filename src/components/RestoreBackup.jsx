@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { parseBackup, planRestore, applyRestore } from "../lib/restore";
 
 /*
@@ -22,25 +22,36 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 export default function RestoreBackup({ current, validGroups, blocked, deps, onRestored }) {
   const fileRef = useRef(null);
-  const [stage, setStage] = useState("idle"); // idle | review | working | done
+  const [stage, setStage] = useState("idle"); // idle | review | nothing | working | done
+  const [fileName, setFileName] = useState("");
+  const [checked, setChecked] = useState(null); // what was compared, for the "nothing to restore" panel
+  const panelRef = useRef(null);
   const [error, setError] = useState("");
-  const [info, setInfo] = useState("");
   const [review, setReview] = useState(null); // { plan, exportedAt, skipped }
   const [selected, setSelected] = useState(new Set());
   const [result, setResult] = useState(null);
 
-  const reset = () => { setStage("idle"); setError(""); setInfo(""); setReview(null); setSelected(new Set()); setResult(null); };
+  const reset = () => { setStage("idle"); setError(""); setReview(null); setSelected(new Set()); setResult(null); setChecked(null); };
+
+  // Every outcome gets its own panel; bring it into view so it can't be missed
+  // (the button sits near the bottom of a long Settings page).
+  useEffect(() => {
+    if (stage !== "idle") panelRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [stage]);
 
   const onFile = async (file) => {
-    setError(""); setInfo("");
+    setError("");
     if (!file) return;
     let text;
     try { text = await file.text(); } catch { setError("Couldn't read that file."); return; }
     const parsed = parseBackup(text);
     if (!parsed.ok) { setError(parsed.error); return; }
     const plan = planRestore(parsed.backup, current, { validGroups });
+    setFileName(file.name || "");
     if (plan.counts.new + plan.counts.differs === 0) {
-      setInfo("Everything in that backup is already in your account, so there's nothing to restore.");
+      setChecked(SECTIONS.map(([k]) => [k, plan.sections[k].length]).filter(([, n]) => n > 0)
+        .map(([k, n]) => plural(n, noun[k])).join(", "));
+      setStage("nothing");
       return;
     }
     setReview({ plan, exportedAt: parsed.backup.exportedAt, skipped: parsed.skipped });
@@ -80,7 +91,20 @@ export default function RestoreBackup({ current, validGroups, blocked, deps, onR
         </div>
         {blocked && <div className="sa-sub" style={{ fontSize: 12, marginTop: 6, color: "#E8B93E" }}>{blocked}</div>}
         {error && <div className="sa-shortbanner" style={{ marginTop: 10 }}>{error}</div>}
-        {info && <div className="sa-sub" style={{ marginTop: 10 }}>{info}</div>}
+      </div>
+    );
+  }
+
+  if (stage === "nothing") {
+    return (
+      <div ref={panelRef} className="sa-card" style={{ marginTop: 14, background: "#20242b", borderColor: "#5FA85C" }}>
+        <div style={{ fontWeight: 700, marginBottom: 4 }}>
+          <span style={{ color: "#5FA85C" }}>✓</span> Nothing to restore — everything in this backup is already in your account.
+        </div>
+        <div className="sa-sub">
+          {fileName ? `Checked ${fileName}: ` : "Checked: "}{checked || "no data"} — all match what you have now.
+        </div>
+        <button className="sa-btn" style={{ marginTop: 10 }} onClick={reset}>OK</button>
       </div>
     );
   }
@@ -89,7 +113,7 @@ export default function RestoreBackup({ current, validGroups, blocked, deps, onR
     const { plan, exportedAt, skipped } = review;
     const chosen = [...selected].length;
     return (
-      <div className="sa-card" style={{ marginTop: 14, background: "#20242b" }}>
+      <div ref={panelRef} className="sa-card" style={{ marginTop: 14, background: "#20242b" }}>
         <div style={{ fontWeight: 700, marginBottom: 4 }}>Restore from backup</div>
         <div className="sa-sub" style={{ marginBottom: 10 }}>
           {exportedAt ? `Backup made ${new Date(exportedAt).toLocaleString()}. ` : ""}
@@ -141,7 +165,7 @@ export default function RestoreBackup({ current, validGroups, blocked, deps, onR
   const r = result.restored;
   const parts = SECTIONS.filter(([k]) => r[k]).map(([k]) => plural(r[k], noun[k]));
   return (
-    <div className="sa-card" style={{ marginTop: 14, background: "#20242b" }}>
+    <div ref={panelRef} className="sa-card" style={{ marginTop: 14, background: "#20242b" }}>
       <div style={{ fontWeight: 700, marginBottom: 4 }}>
         {parts.length ? `Restored ${parts.join(", ")}.` : "Nothing was restored."}
       </div>

@@ -519,7 +519,10 @@ export default function StageAdvance() {
       onSaveOk: () => setSaveError(false),
     });
   }
-  useEffect(() => () => syncRef.current.dispose(), []);
+  useEffect(() => {
+    syncRef.current.resume(); // StrictMode runs cleanup-then-setup on the same instance in dev
+    return () => syncRef.current.dispose();
+  }, []);
   const prefsChainRef = useRef(Promise.resolve()); // serializes color/chip saves
   const pendingColorsRef = useRef({});
   const colorTimerRef = useRef(null);

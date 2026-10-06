@@ -194,3 +194,17 @@ test("dispose stops everything", async () => {
   await wait(60);
   assert.equal(api.calls.length, 0);
 });
+
+test("dispose then resume (React StrictMode / remount) brings saving back to life", async () => {
+  const { api, shows, sync } = setup();
+  api.db.set("a", { show: { id: "a" }, version: "v0" });
+  sync.setBaseline([{ id: "a", version: "v0" }]);
+  sync.dispose();                // cleanup half of the effect
+  sync.resume();                 // setup half runs again
+  shows.set("a", { id: "a", band: "after remount" });
+  sync.markDirty("a");
+  await sync.flushNow();
+  assert.equal(api.db.get("a").show.band, "after remount");
+  await sync.remove("a");
+  assert.equal(api.db.has("a"), false);
+});

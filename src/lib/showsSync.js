@@ -127,6 +127,12 @@ export function createShowsSync({
       stopped = true;
       clearTimeout(debounceTimer);
       clearTimeout(retryTimer);
+      retryTimer = null;
     },
+
+    /** Undo dispose(). React (StrictMode in dev, or any remount) can run an
+        effect's cleanup and then its setup again on the same instance — the
+        engine must come back to life, not stay silently dead. */
+    resume() { stopped = false; },
   };
 }
