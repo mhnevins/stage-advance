@@ -1,6 +1,6 @@
 # StageAdvance Privacy Notice (Draft)
 
-**Last updated:** September 17, 2026
+**Last updated:** October 24, 2026
 
 ---
 
@@ -36,6 +36,9 @@ There are three kinds of people whose information touches this app:
 - Name and email (for login and account recovery)
 - Your mic/DI inventory (models, quantities) — gear info, not personal data
 - Shows you create: band names, venues, dates, channel lists, your own notes
+- Which days you were active in the planner (for example, that you edited a
+  show or changed your gear locker on a given date) — just the date, never
+  what you changed
 
 **When a band contact fills out your questionnaire:**
 - Band name, contact name, email, and mobile number
@@ -59,9 +62,10 @@ engineers on the platform.
 - To generate and store your input lists, gear pulls, and crew sheets
 - To route questionnaire submissions to the correct engineer's inbox
 - To let you contact a band using the info they provided
-- To review aggregate usage (e.g. number of shows, feature activity) so we can
-  understand engagement and improve the product — not to read the contents of
-  your shows or submissions beyond what's needed for support
+- To review aggregate usage (e.g. number of shows, which days accounts were
+  active, feature activity) so we can understand engagement and improve the
+  product — not to read the contents of your shows or submissions beyond
+  what's needed for support
 
 We do not sell data, use it for advertising, or share it with other engineers
 or bands beyond what's described above.
@@ -90,7 +94,7 @@ submission at any time.
 
 Shows, inventory, and questionnaire submissions are kept until you delete
 them yourself. Deleting your account is immediate and permanent: it removes
-your login and all associated shows, inventory, and submissions right away
+your login and all associated shows, inventory, submissions, and activity dates right away
 — there is no grace period or recovery window, so make sure it's what you
 want before confirming. Access requests (approved or declined) are kept as
 a record of who's asked for access and why; unlike account data, there's no

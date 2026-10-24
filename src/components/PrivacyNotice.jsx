@@ -9,7 +9,7 @@ export default function PrivacyNotice() {
     <div className="sa-grid" style={{ maxWidth: 720, margin: "0 auto" }}>
       <div className="sa-card">
         <h2 className="sa-h2">StageAdvance Privacy Notice</h2>
-        <div className="sa-sub" style={{ marginBottom: 20 }}>Last updated: September 17, 2026</div>
+        <div className="sa-sub" style={{ marginBottom: 20 }}>Last updated: October 24, 2026</div>
 
         <h3 className="sa-h2" style={{ fontSize: 15 }}>1. Who this covers</h3>
         <p className="sa-sub">
@@ -38,6 +38,7 @@ export default function PrivacyNotice() {
           <li>Name and email (for login and account recovery)</li>
           <li>Your mic/DI inventory (models, quantities) — gear info, not personal data</li>
           <li>Shows you create: band names, venues, dates, channel lists, your own notes</li>
+          <li>Which days you were active in the planner (for example, that you edited a show or changed your gear locker on a given date) — just the date, never what you changed</li>
         </ul>
         <p className="sa-sub"><b>When a band contact fills out your questionnaire:</b></p>
         <ul className="sa-sub">
@@ -64,7 +65,7 @@ export default function PrivacyNotice() {
           <li>To generate and store your input lists, gear pulls, and crew sheets</li>
           <li>To route questionnaire submissions to the correct engineer's inbox</li>
           <li>To let you contact a band using the info they provided</li>
-          <li>To review aggregate usage (e.g. number of shows, feature activity) so we can
+          <li>To review aggregate usage (e.g. number of shows, which days accounts were active, feature activity) so we can
             understand engagement and improve the product — not to read the contents of your
             shows or submissions beyond what's needed for support</li>
         </ul>
@@ -99,7 +100,7 @@ export default function PrivacyNotice() {
         <p className="sa-sub">
           Shows, inventory, and questionnaire submissions are kept until you delete them
           yourself. Deleting your account is immediate and permanent: it removes your
-          login and all associated shows, inventory, and submissions right away — there
+          login and all associated shows, inventory, submissions, and activity dates right away — there
           is no grace period or recovery window, so make sure it's what you want before
           confirming. Access requests (approved or declined) are kept as a record of who's
           asked for access and why; unlike account data, there's no self-serve delete for
