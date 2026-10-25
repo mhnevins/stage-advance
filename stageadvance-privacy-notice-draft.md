@@ -14,8 +14,9 @@ whom, and how it's kept separate between accounts.
 There are three kinds of people whose information touches this app:
 
 - **Prospective users** — people who submit a Request Access form before
-  they have an account. Their information is used to review and grant
-  access.
+  they have an account. Their information is used to grant access. Most
+  requests are approved automatically; we may hold some for manual review
+  (for example, if something looks unusual), and may decline requests.
 - **Engineers** — the account holders who sign up, use the planner, and send
   out questionnaire links.
 - **Band contacts** — people who fill out an engineer's questionnaire link.

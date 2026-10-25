@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
-import { listAccessRequests, decideAccessRequest, resetAccessRequest, accessRequestsToCsv, SOURCE_OPTIONS } from "../lib/accessRequests";
+import {
+  listAccessRequests, decideAccessRequest, resetAccessRequest, accessRequestsToCsv, SOURCE_OPTIONS,
+  getAutoApprove, setAutoApprove,
+} from "../lib/accessRequests";
 
 const SOURCE_LABEL = Object.fromEntries(SOURCE_OPTIONS.map((o) => [o.value, o.label]));
 
@@ -12,6 +15,24 @@ export default function AdminRequests() {
     listAccessRequests().then(setRows).catch((e) => setErr(e.message || "Couldn't load requests."));
   };
   useEffect(load, []);
+
+  // Kill switch for automatic approval. null = not loaded / unavailable
+  // (e.g. migration 0007 not run yet) — the switch is hidden then.
+  const [auto, setAuto] = useState(null);
+  const [autoBusy, setAutoBusy] = useState(false);
+  useEffect(() => { getAutoApprove().then(setAuto).catch(() => setAuto(null)); }, []);
+  const toggleAuto = async () => {
+    setAutoBusy(true);
+    setErr("");
+    try {
+      await setAutoApprove(!auto);
+      setAuto(!auto);
+    } catch (e) {
+      setErr(e.message || "Couldn't change that setting — please try again.");
+    } finally {
+      setAutoBusy(false);
+    }
+  };
 
   const decide = async (id, decision, email) => {
     setBusyId(id);
@@ -88,7 +109,7 @@ export default function AdminRequests() {
       ) : (
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
           <div className="sa-sub">
-            {r.status === "approved" ? "Approved" : "Declined"} {r.decided_at && new Date(r.decided_at).toLocaleString()}
+            {r.status === "approved" ? (r.auto_approved ? "Auto-approved" : "Approved") : "Declined"} {r.decided_at && new Date(r.decided_at).toLocaleString()}
           </div>
           <button className="sa-btn ghost" style={{ fontSize: 12 }} disabled={busyId === r.id}
             onClick={() => reset(r.id)} title="Move back to pending so you can Approve/Decline it again">
@@ -106,6 +127,22 @@ export default function AdminRequests() {
         <button className="sa-btn" onClick={exportCsv} disabled={!rows.length}>Export CSV</button>
       </div>
       {err && <div className="sa-shortbanner" style={{ margin: "10px 0" }}>{err}</div>}
+
+      {auto !== null && (
+        <div className="sa-card" style={{ padding: 16, marginBottom: 10, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+          <div>
+            <strong>Automatic approval: {auto ? "ON" : "OFF"}</strong>
+            <div className="sa-sub" style={{ marginTop: 2 }}>
+              {auto
+                ? "New requests are invited right away. Anything suspicious, or past the hourly/daily limit, waits here for you."
+                : "Every new request waits here for you to approve it."}
+            </div>
+          </div>
+          <button className={auto ? "sa-btn" : "sa-btn primary"} disabled={autoBusy} onClick={toggleAuto}>
+            {autoBusy ? "Working…" : auto ? "Turn off" : "Turn on"}
+          </button>
+        </div>
+      )}
 
       <h3 className="sa-h2" style={{ fontSize: 16, marginTop: 20 }}>Pending ({pending.length})</h3>
       {pending.length ? pending.map(row) : <div className="sa-sub">Nothing waiting on you right now.</div>}

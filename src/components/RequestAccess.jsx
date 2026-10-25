@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { submitAccessRequest, SOURCE_OPTIONS } from "../lib/accessRequests";
 
 const blank = {
@@ -12,7 +12,9 @@ export default function RequestAccess() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [done, setDone] = useState(false);
-  const set = (patch) => setF((prev) => ({ ...prev, ...patch }));
+  const [approved, setApproved] = useState(false); // true = invite already sent
+  const openedAt = useRef(Date.now()); // how long the form was open — instant submits are bots
+  const set =(patch) => setF((prev) => ({ ...prev, ...patch }));
 
   const submit = async (e) => {
     e.preventDefault();
@@ -24,7 +26,8 @@ export default function RequestAccess() {
     setErr("");
     setBusy(true);
     try {
-      await submitAccessRequest(f);
+      const { autoApproved } = await submitAccessRequest({ ...f, elapsedMs: Date.now() - openedAt.current });
+      setApproved(autoApproved);
       setDone(true);
     } catch (e2) {
       setErr(e2.message || "Couldn't submit your request — please try again.");
@@ -39,9 +42,13 @@ export default function RequestAccess() {
         <div className="sa-logo" style={{ marginBottom: 6, textAlign: "center" }}>Stage<span>Advance</span></div>
         {done ? (
           <>
-            <h2 className="sa-h2" style={{ marginTop: 14, textAlign: "center" }}>Thanks for your interest</h2>
+            <h2 className="sa-h2" style={{ marginTop: 14, textAlign: "center" }}>
+              {approved ? "You're in!" : "Thanks for your interest"}
+            </h2>
             <div className="sa-sub" style={{ textAlign: "center" }}>
-              We'll review your request and email you at {f.email || "the address you gave us"} once you're in.
+              {approved
+                ? <>Your invite is on its way to {f.email || "the address you gave us"} — click the link in that email to open StageAdvance. It can take a minute or two to arrive; if you don't see it, check your spam or promotions folder.</>
+                : <>We'll review your request and email you at {f.email || "the address you gave us"} once you're in.</>}
             </div>
           </>
         ) : (

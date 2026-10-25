@@ -21,8 +21,12 @@ export const SOURCE_OPTIONS = [
   { value: "other", label: "Other" },
 ];
 
+/* Returns { autoApproved } — true when the invite email is already on its
+   way (see netlify/functions/auto-approve.js), false when the request is
+   waiting for manual review. */
 export async function submitAccessRequest({
   firstName, lastName, email, company, source, sourceOther, referredBy, about, marketingConsent,
+  elapsedMs,
 }) {
   const client = requireSupabase();
   const { error } = await client.from("access_requests").insert({
@@ -55,6 +59,44 @@ export async function submitAccessRequest({
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ firstName, lastName, email, company, source, sourceOther, referredBy }),
   }).catch(() => {});
+
+  // Ask the server to approve it on the spot. Any failure (no Functions
+  // server under `vite dev`, timeout, guardrail said no) just means the
+  // request waits for manual review, which is exactly the old behaviour.
+  let autoApproved = false;
+  try {
+    const res = await fetch("/.netlify/functions/auto-approve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: email.trim().toLowerCase(), elapsedMs }),
+      signal: AbortSignal.timeout(20000),
+    });
+    if (res.ok) autoApproved = Boolean((await res.json()).approved);
+  } catch {
+    // fall through — treated as "not auto-approved"
+  }
+  return { autoApproved };
+}
+
+/* The kill switch for automatic approval (app_settings row, see migration
+   0007). Readable/writable by the admin only — enforced by RLS. */
+export async function getAutoApprove() {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("app_settings").select("value").eq("key", "auto_approve").maybeSingle();
+  if (error) throw error;
+  return data?.value === "on";
+}
+
+export async function setAutoApprove(on) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("app_settings")
+    .update({ value: on ? "on" : "off", updated_at: new Date().toISOString() })
+    .eq("key", "auto_approve")
+    .select("key");
+  if (error) throw error;
+  if (!data?.length) throw new Error("The auto-approve setting doesn't exist yet — run migration 0007 in Supabase.");
 }
 
 export async function listAccessRequests() {

@@ -20,7 +20,7 @@ export default function PrivacyNotice() {
         </p>
         <p className="sa-sub">There are three kinds of people whose information touches this app:</p>
         <ul className="sa-sub">
-          <li><b>Prospective users</b> — people who submit a Request Access form before they have an account. Their information is used to review and grant access.</li>
+          <li><b>Prospective users</b> — people who submit a Request Access form before they have an account. Their information is used to grant access. Most requests are approved automatically; we may hold some for manual review (for example, if something looks unusual), and may decline requests.</li>
           <li><b>Engineers</b> — the account holders who sign up, use the planner, and send out questionnaire links.</li>
           <li><b>Band contacts</b> — people who fill out an engineer's questionnaire link. They do not have accounts and did not sign up for this service directly; they're submitting information to a specific engineer they're already working with.</li>
         </ul>
