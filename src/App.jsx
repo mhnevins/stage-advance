@@ -304,6 +304,9 @@ const blankForm = () => ({
 
 const GROUP_COLORS_KEY = "stage-advance:group-colors";
 const OUTPUT_CHIPS_KEY = "stage-advance:output-chips";
+const FB_GROUP_DISMISSED_KEY = "stage-advance:fb-group-dismissed";
+// Private Facebook group for StageAdvance users (updates, bug reports, ideas).
+const FB_GROUP_URL = "https://www.facebook.com/share/g/1MZnDC4k5y/";
 
 /* Quick-add chips for the Outputs section — the default set from Brian's
    review (2026-09-25). A `stereo` chip adds an L + R pair, stereo-linked
@@ -483,6 +486,7 @@ export default function StageAdvance() {
   const [outputOverIdx, setOutputOverIdx] = useState(null);
   const [showOutputBoxPanel, setShowOutputBoxPanel] = useState(false);
   const [customOutputChips, setCustomOutputChips] = useState([]); // [{ id, name, stereo }], per account
+  const [fbBannerDismissed, setFbBannerDismissed] = useState(true); // true until we know otherwise, so it never flashes
   const [newChipName, setNewChipName] = useState("");
   const [newChipStereo, setNewChipStereo] = useState(false);
   const [endpointItems, setEndpointItems] = useState([]);
@@ -730,6 +734,12 @@ export default function StageAdvance() {
         const r = await storage.get(OUTPUT_CHIPS_KEY);
         if (!cancelled) setCustomOutputChips(r?.value ? JSON.parse(r.value) : []);
       } catch (e) { if (!cancelled) setCustomOutputChips([]); }
+    })();
+    (async () => {
+      try {
+        const r = await storage.get(FB_GROUP_DISMISSED_KEY);
+        if (!cancelled) setFbBannerDismissed(r?.value === "1");
+      } catch (e) { /* can't tell — stay hidden rather than nag */ }
     })();
     loadInventory();
     loadEndpoints();
@@ -1847,6 +1857,29 @@ ${gearSection}
         ))}
       </div>
 
+      {!fbBannerDismissed && (
+        <div className="sa-card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <div style={{ fontWeight: 700 }}>Join the StageAdvance user group</div>
+            <div className="sa-sub">
+              Our private Facebook group is the best place to get updates, report issues, and share ideas with other engineers.
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <a href={FB_GROUP_URL} target="_blank" rel="noopener noreferrer"
+              className="sa-btn primary" style={{ textDecoration: "none", display: "inline-block" }}>
+              Join the group
+            </a>
+            <button className="sa-btn ghost" onClick={() => {
+              setFbBannerDismissed(true);
+              storage.set(FB_GROUP_DISMISSED_KEY, "1").catch(() => {});
+            }}>
+              Not now
+            </button>
+          </div>
+        </div>
+      )}
+
       {inventoryItems.length === 0 && (
         <div className="sa-card" style={{ cursor: "pointer", borderColor: "#E8B93E" }} onClick={() => setMode("locker")}>
           <div style={{ fontWeight: 700, color: "#E8B93E" }}>Your locker is empty</div>
@@ -2424,6 +2457,17 @@ ${gearSection}
             )}
           </div>
         ))}
+      </div>
+
+      <div className="sa-card" style={{ textAlign: "center" }}>
+        <h2 className="sa-h2">User group</h2>
+        <div className="sa-sub" style={{ marginBottom: 14 }}>
+          Our private Facebook group is the best place to get updates, report issues, and share ideas with other engineers.
+        </div>
+        <a href={FB_GROUP_URL} target="_blank" rel="noopener noreferrer"
+          className="sa-btn" style={{ padding: "10px 22px", fontSize: 14, textDecoration: "none", display: "inline-block" }}>
+          Join the Facebook group
+        </a>
       </div>
 
       <div className="sa-card" style={{ textAlign: "center" }}>
