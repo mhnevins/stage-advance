@@ -3,6 +3,7 @@ import {
   listAccessRequests, decideAccessRequest, resetAccessRequest, accessRequestsToCsv, SOURCE_OPTIONS,
   getAutoApprove, setAutoApprove,
 } from "../lib/accessRequests";
+import { planBulkApproval, BULK_APPROVE_MAX } from "../lib/bulkApprove";
 
 const SOURCE_LABEL = Object.fromEntries(SOURCE_OPTIONS.map((o) => [o.value, o.label]));
 
@@ -10,6 +11,8 @@ export default function AdminRequests() {
   const [rows, setRows] = useState(null);
   const [err, setErr] = useState("");
   const [busyId, setBusyId] = useState(null);
+  const [bulk, setBulk] = useState(null); // { done, total } while "Approve all pending" is running
+  const [note, setNote] = useState(""); // result of the last bulk approval
 
   const load = () => {
     listAccessRequests().then(setRows).catch((e) => setErr(e.message || "Couldn't load requests."));
@@ -75,6 +78,45 @@ export default function AdminRequests() {
   if (rows === null) return <div className="sa-sub" style={{ textAlign: "center", margin: 60 }}>Loading…</div>;
 
   const pending = rows.filter((r) => r.status === "pending");
+
+  // One at a time, oldest first, through the same path as the single
+  // Approve button (invite email, then mark approved). Stops at the first
+  // failure — most likely Supabase's hourly email limit — and leaves the
+  // rest pending.
+  const approveAllPending = async () => {
+    const { batch, skippedDisposable, remaining } = planBulkApproval(pending);
+    if (!batch.length) {
+      setNote(skippedDisposable ? `Nothing to approve — the ${skippedDisposable} pending request(s) use disposable email addresses, so I left them for you to judge.` : "");
+      return;
+    }
+    const lines = [`Approve ${batch.length} pending request${batch.length === 1 ? "" : "s"} now? Each person gets an invite email.`];
+    if (skippedDisposable) lines.push(`${skippedDisposable} with disposable email addresses will be skipped.`);
+    if (remaining) lines.push(`${remaining} more will stay pending (limit ${BULK_APPROVE_MAX} per click, because of email limits) — click again later.`);
+    lines.push("Automatic approval of new requests pauses for about an hour afterwards, so the email limit isn't exceeded.");
+    if (!window.confirm(lines.join("\n\n"))) return;
+
+    setErr("");
+    setNote("");
+    let done = 0;
+    setBulk({ done, total: batch.length });
+    try {
+      for (const r of batch) {
+        await decideAccessRequest(r.id, "approve", r.email);
+        done += 1;
+        setBulk({ done, total: batch.length });
+      }
+      setNote(
+        `Approved ${done}.` +
+        (skippedDisposable ? ` Skipped ${skippedDisposable} with disposable email addresses.` : "") +
+        (remaining ? ` ${remaining} still pending — click again in a while.` : "")
+      );
+    } catch (e) {
+      setErr(`Stopped after approving ${done} of ${batch.length}: ${e.message || "something went wrong"}. The rest are still pending — try again in a while.`);
+    } finally {
+      setBulk(null);
+      load();
+    }
+  };
   const decided = rows.filter((r) => r.status !== "pending");
 
   const row = (r) => (
@@ -97,11 +139,11 @@ export default function AdminRequests() {
       </div>
       {r.status === "pending" ? (
         <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-          <button className="sa-btn primary" disabled={busyId === r.id}
+          <button className="sa-btn primary" disabled={busyId === r.id || !!bulk}
             onClick={() => decide(r.id, "approve", r.email)}>
             {busyId === r.id ? "Working…" : "Approve"}
           </button>
-          <button className="sa-btn" disabled={busyId === r.id}
+          <button className="sa-btn" disabled={busyId === r.id || !!bulk}
             onClick={() => decide(r.id, "decline", r.email)}>
             Decline
           </button>
@@ -144,7 +186,16 @@ export default function AdminRequests() {
         </div>
       )}
 
-      <h3 className="sa-h2" style={{ fontSize: 16, marginTop: 20 }}>Pending ({pending.length})</h3>
+      {note && <div className="sa-sub" style={{ margin: "10px 0" }}>{note}</div>}
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginTop: 20 }}>
+        <h3 className="sa-h2" style={{ fontSize: 16, margin: 0 }}>Pending ({pending.length})</h3>
+        {pending.length > 0 && (
+          <button className="sa-btn primary" disabled={!!bulk || busyId !== null} onClick={approveAllPending}>
+            {bulk ? `Approving ${bulk.done + 1} of ${bulk.total}…` : "Approve all pending"}
+          </button>
+        )}
+      </div>
       {pending.length ? pending.map(row) : <div className="sa-sub">Nothing waiting on you right now.</div>}
 
       {decided.length > 0 && (
