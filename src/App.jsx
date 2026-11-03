@@ -7,6 +7,7 @@ import { listMyEndpoints, addEndpointItem, updateEndpointItem, removeEndpointIte
 import { listMyShows, showsApi } from "./lib/shows";
 import { createShowsSync } from "./lib/showsSync";
 import RestoreBackup from "./components/RestoreBackup";
+import { boxPositionLabel, positionText, POS_STYLES } from "./lib/boxLabels";
 import { lookupMicLibrary, cacheMicLibraryEntry, fetchAiTagsForMic } from "./lib/micLibrary";
 import { resolveOwnerBySlug, updateMyProfile } from "./lib/profile";
 import { exportMyData, deleteMyAccount } from "./lib/account";
@@ -942,7 +943,7 @@ export default function StageAdvance() {
 
   const addBox = () => {
     const name = String.fromCharCode(65 + boxes.length) || "New box";
-    updateShow({ boxes: [...boxes, { id: uid(), name, color: "#8a8f98", position: "", description: "" }] });
+    updateShow({ boxes: [...boxes, { id: uid(), name, color: "#8a8f98", position: "", description: "", lineStyle: "num" }] });
   };
   const updateBox = (boxId, patch) =>
     updateShow({ boxes: boxes.map((b) => (b.id === boxId ? { ...b, ...patch } : b)) });
@@ -992,7 +993,7 @@ export default function StageAdvance() {
 
   const addOutputBox = () => {
     const name = `Box ${outputBoxes.length + 1}`;
-    updateShow({ outputBoxes: [...outputBoxes, { id: uid(), name, color: "#8a8f98", position: "", description: "" }] });
+    updateShow({ outputBoxes: [...outputBoxes, { id: uid(), name, color: "#8a8f98", position: "", description: "", lineStyle: "num" }] });
   };
   const updateOutputBox = (boxId, patch) =>
     updateShow({ outputBoxes: outputBoxes.map((b) => (b.id === boxId ? { ...b, ...patch } : b)) });
@@ -1238,7 +1239,7 @@ export default function StageAdvance() {
   const boxLabel = (c) => {
     if (!c.boxId || c._boxPos == null) return "";
     const b = boxById(c.boxId);
-    return b ? `${b.name}${c._boxPos}` : "";
+    return b ? boxPositionLabel(b.name, c._boxPos, b.lineStyle) : "";
   };
 
   /* duplicate box lines: two channels can't share the same position in
@@ -1254,7 +1255,7 @@ export default function StageAdvance() {
     .map(([key, chs]) => {
       const [boxId, pos] = key.split(":");
       const b = boxById(boxId);
-      return [key, `${b ? b.name : "?"}${pos}`, chs];
+      return [key, b ? boxPositionLabel(b.name, Number(pos), b.lineStyle) : `?${pos}`, chs];
     });
   const sbDupeSet = new Set(sbDupes.map(([key]) => key));
 
@@ -1270,8 +1271,9 @@ export default function StageAdvance() {
     return { ...o, _boxId: boxId, _boxPos: o.boxPos ?? outputBoxPosCounters[boxId] };
   });
   const outputBoxLabel = (o) => {
-    const name = o._boxId === OUTPUT_LOCAL_BOX ? "Local" : (outputBoxById(o._boxId)?.name || "?");
-    return `${name}${o._boxPos}`;
+    const b = o._boxId === OUTPUT_LOCAL_BOX ? null : outputBoxById(o._boxId);
+    const name = o._boxId === OUTPUT_LOCAL_BOX ? "Local" : (b?.name || "?");
+    return boxPositionLabel(name, o._boxPos, b?.lineStyle);
   };
   const outputDupeMap = {};
   outputsWithBoxPos.forEach((o, i) => {
@@ -1282,8 +1284,9 @@ export default function StageAdvance() {
     .filter(([, os]) => os.length > 1)
     .map(([key, os]) => {
       const [boxId, pos] = key.split(":");
-      const name = boxId === OUTPUT_LOCAL_BOX ? "Local" : (outputBoxById(boxId)?.name || "?");
-      return [key, `${name}${pos}`, os];
+      const b = boxId === OUTPUT_LOCAL_BOX ? null : outputBoxById(boxId);
+      const name = boxId === OUTPUT_LOCAL_BOX ? "Local" : (b?.name || "?");
+      return [key, boxPositionLabel(name, Number(pos), b?.lineStyle), os];
     });
   const outputDupeSet = new Set(outputDupes.map(([key]) => key));
 
@@ -2649,6 +2652,11 @@ ${gearSection}
               </div>
               <input className="sa-input" style={{ width: 120 }} value={b.name}
                 placeholder="A" onChange={(e) => updateBox(b.id, { name: e.target.value })} />
+              <select className="sa-input" style={{ width: 170 }} value={b.lineStyle || "num"}
+                title="How this box's lines are numbered — letters suit gear whose jacks are lettered (e.g. returns A–H)"
+                onChange={(e) => updateBox(b.id, { lineStyle: e.target.value })}>
+                {POS_STYLES.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+              </select>
               <select className="sa-input" style={{ width: 110 }} value={STAGE_POSITIONS.includes(b.position) ? b.position : ""}
                 onChange={(e) => updateBox(b.id, { position: e.target.value })}>
                 <option value="">Position…</option>
@@ -2811,9 +2819,9 @@ ${gearSection}
                       title="Position within this box (defaults to order in the list)"
                       value={c.boxPos ?? ""}
                       onChange={(e) => updateChannel(c.id, { boxPos: e.target.value === "" ? null : Number(e.target.value) })}>
-                      <option value="">{c._boxPos} ·auto</option>
+                      <option value="">{positionText(c._boxPos, boxById(c.boxId)?.lineStyle)} ·auto</option>
                       {Array.from({ length: 48 }, (_, n) => n + 1).map((n) => (
-                        <option key={n} value={n}>{n}</option>
+                        <option key={n} value={n}>{positionText(n, boxById(c.boxId)?.lineStyle)}</option>
                       ))}
                     </select>
                   )}
@@ -2878,6 +2886,11 @@ ${gearSection}
               </div>
               <input className="sa-input" style={{ width: 150 }} value={b.name}
                 placeholder="AES" onChange={(e) => updateOutputBox(b.id, { name: e.target.value })} />
+              <select className="sa-input" style={{ width: 170 }} value={b.lineStyle || "num"}
+                title="How this box's lines are numbered — letters suit gear whose jacks are lettered (e.g. returns A–H)"
+                onChange={(e) => updateOutputBox(b.id, { lineStyle: e.target.value })}>
+                {POS_STYLES.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+              </select>
               <select className="sa-input" style={{ width: 110 }} value={STAGE_POSITIONS.includes(b.position) ? b.position : ""}
                 onChange={(e) => updateOutputBox(b.id, { position: e.target.value })}>
                 <option value="">Position…</option>
@@ -3028,8 +3041,10 @@ ${gearSection}
                       title="Position within this box (defaults to order in the list)"
                       value={o.boxPos ?? ""}
                       onChange={(e) => updateOutput(o.id, { boxPos: e.target.value === "" ? null : Number(e.target.value) })}>
-                      <option value="">{o._boxPos} ·auto</option>
-                      {Array.from({ length: 48 }, (_, n) => n + 1).map((n) => <option key={n} value={n}>{n}</option>)}
+                      <option value="">{positionText(o._boxPos, outputBoxById(o._boxId)?.lineStyle)} ·auto</option>
+                      {Array.from({ length: 48 }, (_, n) => n + 1).map((n) => (
+                        <option key={n} value={n}>{positionText(n, outputBoxById(o._boxId)?.lineStyle)}</option>
+                      ))}
                     </select>
                   </div>
                   <div className="sa-rowbtns no-print">

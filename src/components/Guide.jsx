@@ -161,6 +161,14 @@ export default function Guide() {
         <p className="sa-sub"><b>Boxes</b> — open the "Boxes" panel to define named, colored
           groupings for patch/routing: lettered sub-snakes (A, B, C…) or physical locations (SL,
           Pit, Local). Assign any channel to one from its Stage Box dropdown.</p>
+        <p className="sa-sub"><b>How box lines are labeled</b> — a line is the box name plus its position,
+          like <code>A3</code> or <code>Rack 1-2</code>. A one-letter box name keeps the compact style
+          (<code>A3</code>); any other name gets a hyphen so nothing runs together (a box called "Box 1" prints
+          <code> Box 1-1</code>, <code>Box 1-2</code>, not "Box 11", "Box 12"). Each box also has a <b>numbering
+          style</b>: <b>Numbers</b> (1, 2, 3…) or <b>Letters</b> (A, B, C…), for gear whose jacks are lettered. For
+          example, an analog stage box with 16 inputs and 8 returns labeled A to H: make one box for the inputs
+          (numbers) and one for the returns (letters) at the same stage position, and your outputs print as
+          <code> Returns-A</code>, <code>Returns-B</code> and so on, matching the labels on the hardware.</p>
         <p className="sa-sub"><b>Reordering, duplicating, shortcuts</b> — every row has ⧉ (duplicate),
           ↑/↓ (move), and ✕ (remove) buttons — the reliable way to reorder on a phone or tablet,
           since drag-and-drop needs a mouse. On desktop you can also drag a row by its ⠿ handle, or
