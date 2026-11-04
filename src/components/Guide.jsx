@@ -65,7 +65,8 @@ export default function Guide() {
         </Step>
         <Step n={2} title="Check your email for the invite">
           Once approved, an email arrives with a one-time sign-in link. Open it on the device you
-          want signed in on — no password to invent or remember.
+          want signed in on — no password to invent or remember. If the link doesn't work or has
+          expired, go to the sign-in page and enter the same email for a fresh one.
         </Step>
         <Step n={3} title="You're in — the planner is empty on purpose">
           First login drops you on the <b>Planner</b> with no shows and no inventory yet. That's

@@ -508,6 +508,7 @@ export default function StageAdvance() {
   const saveTimer = useRef(null);
   const [showsConflict, setShowsConflict] = useState(false); // a show was changed/deleted elsewhere — see showsSync.js
   const [showsLoadError, setShowsLoadError] = useState(false);
+  const [showsLoaded, setShowsLoaded] = useState(false); // true once the shows list has actually arrived from the server
   const [saveError, setSaveError] = useState(false);
   /* Per-show saving lives in showsSync.js (React-free, unit tested).
      It reads the latest shows through showsRef rather than a stale
@@ -707,6 +708,7 @@ export default function StageAdvance() {
     syncRef.current.setBaseline([]);
     setShowsConflict(false);
     setShowsLoadError(false);
+    setShowsLoaded(false);
     setSaveError(false);
     if (!user || isStaticRoute) { setShows([]); setInventoryItems([]); setEndpointItems([]); setGroupColors({}); setCustomOutputChips([]); return; }
     let cancelled = false; // a sign-out/sign-in swap must never show the previous account's data
@@ -716,6 +718,7 @@ export default function StageAdvance() {
         if (cancelled) return;
         syncRef.current.setBaseline(baseline);
         setShows(list);
+        setShowsLoaded(true);
       } catch (e) {
         // Don't pretend the planner is empty — say the load failed. Nothing
         // can be lost by this: shows are only ever written when edited, and
@@ -1186,6 +1189,13 @@ export default function StageAdvance() {
   }, [mode, active, openColorPickerId]);
 
   const sortByGroup = () => updateShow({ channels: groupSort(active.channels) });
+
+  const startNewShow = () => {
+    const s = newShow();
+    setShows((p) => [s, ...p]);
+    syncRef.current.markDirty(s.id);
+    setActiveId(s.id);
+  };
 
   const deleteShow = (id) => {
     setShows((prev) => prev.filter((s) => s.id !== id));
@@ -1817,6 +1827,52 @@ ${gearSection}
   /* ————————————————— PLANNER ————————————————— */
   const renderShowList = () => (
     <div className="sa-grid">
+      {/* First-run welcome — only for someone with no shows yet, and only once
+          the list has really loaded (never flashes for existing users).
+          Disappears by itself as soon as the first show exists. */}
+      {showsLoaded && shows.length === 0 && (
+        <div className="sa-card" style={{ borderColor: "#E8B93E" }}>
+          <h2 className="sa-h2" style={{ fontSize: 17 }}>Welcome to StageAdvance</h2>
+          <div className="sa-sub" style={{ marginBottom: 14 }}>
+            Three steps to your first crew-ready input list. It takes about five minutes.
+          </div>
+          {[
+            {
+              n: 1, title: "Add your mics",
+              text: inventoryItems.length > 0
+                ? `You have ${inventoryItems.length} item${inventoryItems.length === 1 ? "" : "s"} in your inventory. Nice start.`
+                : "Optional, but it's what makes mic suggestions and shortage warnings useful. Skip it and you can type mics as you go.",
+              action: <button className="sa-btn" onClick={() => setMode("locker")}>Open Inventory</button>,
+            },
+            {
+              n: 2, title: "Create your first show",
+              text: "Band, date, venue. All optional, and all editable later.",
+              action: <button className="sa-btn primary" onClick={startNewShow}>+ New show</button>,
+            },
+            {
+              n: 3, title: "Tap what's on stage, then print",
+              text: "Tap instrument buttons to build the input list, then print a crew sheet or export it.",
+              action: (
+                <a href="/guide" target="_blank" rel="noopener noreferrer" className="sa-btn ghost"
+                  style={{ textDecoration: "none", display: "inline-block" }}>Read the guide</a>
+              ),
+            },
+          ].map((st) => (
+            <div key={st.n} style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
+              <div style={{
+                flexShrink: 0, width: 26, height: 26, borderRadius: 7, background: "#2c2f37", border: "1px solid #3a3e48",
+                display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, color: "#E8B93E", fontSize: 13,
+              }}>{st.n}</div>
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <div style={{ fontWeight: 700 }}>{st.title}</div>
+                <div className="sa-sub">{st.text}</div>
+              </div>
+              <div>{st.action}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Inbox */}
       <div className="sa-card sa-inbox">
         <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
@@ -1883,7 +1939,7 @@ ${gearSection}
         </div>
       )}
 
-      {inventoryItems.length === 0 && (
+      {inventoryItems.length === 0 && showsLoaded && shows.length > 0 && (
         <div className="sa-card" style={{ cursor: "pointer", borderColor: "#E8B93E" }} onClick={() => setMode("locker")}>
           <div style={{ fontWeight: 700, color: "#E8B93E" }}>Your locker is empty</div>
           <div className="sa-sub">Add your mics and DIs so mic pulls and shortage warnings actually mean something — tap here to set it up →</div>
@@ -1891,15 +1947,9 @@ ${gearSection}
       )}
 
       <button className="sa-btn primary" style={{ alignSelf: "start", width: "fit-content" }}
-        onClick={() => { const s = newShow(); setShows((p) => [s, ...p]); syncRef.current.markDirty(s.id); setActiveId(s.id); }}>
+        onClick={startNewShow}>
         + New show
       </button>
-      {shows.length === 0 && (
-        <div className="sa-empty sa-card">
-          No shows yet. Create one, tap instruments to build the input list,
-          and the mic pull and stand count assemble themselves — checked against your locker.
-        </div>
-      )}
       {shows.map((s) => (
         <div key={s.id} className="sa-show-row" onClick={() => setActiveId(s.id)}>
           <div>

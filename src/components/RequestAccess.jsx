@@ -47,7 +47,11 @@ export default function RequestAccess() {
             </h2>
             <div className="sa-sub" style={{ textAlign: "center" }}>
               {approved
-                ? <>Your invite is on its way to {f.email || "the address you gave us"} — click the link in that email to open StageAdvance. It can take a minute or two to arrive; if you don't see it, check your spam or promotions folder.</>
+                ? <>Your invite is on its way to {f.email || "the address you gave us"} — click the link in that email to open StageAdvance. It can take a minute or two to arrive; if you don't see it, check your spam or promotions folder.
+                    <div style={{ marginTop: 10 }}>
+                      If the link doesn't work or has expired, go to the <a href="/login" style={{ color: "#E8B93E" }}>sign-in page</a> and
+                      enter the same email to get a fresh link. You're already set up.
+                    </div></>
                 : <>We'll review your request and email you at {f.email || "the address you gave us"} once you're in.</>}
             </div>
           </>
