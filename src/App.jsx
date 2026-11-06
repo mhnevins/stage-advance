@@ -8,6 +8,7 @@ import { listMyShows, showsApi } from "./lib/shows";
 import { createShowsSync } from "./lib/showsSync";
 import RestoreBackup from "./components/RestoreBackup";
 import { boxPositionLabel, positionText, POS_STYLES } from "./lib/boxLabels";
+import { withOutputPositions, OUTPUT_LOCAL_BOX } from "./lib/outputPositions";
 import { lookupMicLibrary, cacheMicLibraryEntry, fetchAiTagsForMic } from "./lib/micLibrary";
 import { resolveOwnerBySlug, updateMyProfile } from "./lib/profile";
 import { exportMyData, deleteMyAccount } from "./lib/account";
@@ -58,6 +59,13 @@ const STAND_OPTIONS = ["Tall boom", "Short boom", "Straight", "Drum clamp", "Des
    perspective facing the audience). "Other" is the same manual escape
    hatch used for rental mics — a venue-specific spot (e.g. "MONITOR
    WORLD") that isn't one of these is just typed in directly. */
+/* Output list column names — PROVISIONAL, chosen to match how a console + snake
+   + stage box is actually described: the output channel is assigned to a
+   console output (Local, Dante, AES...), and that signal may then come up on a
+   stage box return. Change them here and they change everywhere. */
+const OUT_COL_CONSOLE = "Console Output";
+const OUT_COL_RETURN = "Stage Box Return";
+
 const STAGE_POSITIONS = ["USL", "USC", "USR", "SL", "C", "SR", "DSL", "DSC", "DSR"];
 const POSITION_OTHER = "__other_position";
 
@@ -1003,7 +1011,12 @@ export default function StageAdvance() {
   const removeOutputBox = (boxId) =>
     updateShow({
       outputBoxes: outputBoxes.filter((b) => b.id !== boxId),
-      outputs: outputs.map((o) => (o.boxId === boxId ? { ...o, boxId: null, boxPos: null } : o)),
+      outputs: outputs.map((o) => {
+        let n = o;
+        if (o.boxId === boxId) n = { ...n, boxId: null, boxPos: null };
+        if (o.rtnBoxId === boxId) n = { ...n, rtnBoxId: null, rtnPos: null };
+        return n;
+      }),
     });
 
   const addOutput = () =>
@@ -1273,24 +1286,24 @@ export default function StageAdvance() {
      explicit box defaults to a built-in "Local" pseudo-box instead of
      showing nothing — physical local outs are the assumed default
      until overridden with a real box (AES, Dante, etc.). */
-  const OUTPUT_LOCAL_BOX = "__local";
-  const outputBoxPosCounters = {};
-  const outputsWithBoxPos = outputs.map((o) => {
-    const boxId = o.boxId || OUTPUT_LOCAL_BOX;
-    outputBoxPosCounters[boxId] = (outputBoxPosCounters[boxId] || 0) + 1;
-    return { ...o, _boxId: boxId, _boxPos: o.boxPos ?? outputBoxPosCounters[boxId] };
-  });
+  const outputsWithBoxPos = withOutputPositions(outputs, (id) => Boolean(outputBoxById(id)));
+  const hasOutputReturns = outputsWithBoxPos.some((o) => o._rtnPos != null);
   const outputBoxLabel = (o) => {
     const b = o._boxId === OUTPUT_LOCAL_BOX ? null : outputBoxById(o._boxId);
     const name = o._boxId === OUTPUT_LOCAL_BOX ? "Local" : (b?.name || "?");
     return boxPositionLabel(name, o._boxPos, b?.lineStyle);
+  };
+  const outputReturnLabel = (o) => {
+    if (o._rtnPos == null) return "";
+    const b = outputBoxById(o.rtnBoxId);
+    return b ? boxPositionLabel(b.name, o._rtnPos, b.lineStyle) : "";
   };
   const outputDupeMap = {};
   outputsWithBoxPos.forEach((o, i) => {
     const key = `${o._boxId}:${o._boxPos}`;
     (outputDupeMap[key] = outputDupeMap[key] || []).push(i + 1);
   });
-  const outputDupes = Object.entries(outputDupeMap)
+  const outputConsoleDupes = Object.entries(outputDupeMap)
     .filter(([, os]) => os.length > 1)
     .map(([key, os]) => {
       const [boxId, pos] = key.split(":");
@@ -1298,6 +1311,20 @@ export default function StageAdvance() {
       const name = boxId === OUTPUT_LOCAL_BOX ? "Local" : (b?.name || "?");
       return [key, boxPositionLabel(name, Number(pos), b?.lineStyle), os];
     });
+  const outputRtnMap = {};
+  outputsWithBoxPos.forEach((o, i) => {
+    if (o._rtnPos == null) return;
+    const key = `rtn:${o.rtnBoxId}:${o._rtnPos}`;
+    (outputRtnMap[key] = outputRtnMap[key] || []).push(i + 1);
+  });
+  const outputReturnDupes = Object.entries(outputRtnMap)
+    .filter(([, os]) => os.length > 1)
+    .map(([key, os]) => {
+      const [, boxId, pos] = key.split(":");
+      const b = outputBoxById(boxId);
+      return [key, boxPositionLabel(b?.name || "?", Number(pos), b?.lineStyle), os];
+    });
+  const outputDupes = [...outputConsoleDupes, ...outputReturnDupes];
   const outputDupeSet = new Set(outputDupes.map(([key]) => key));
 
   /* ——— export ——— */
@@ -1325,10 +1352,10 @@ export default function StageAdvance() {
 
     if (outputsWithBoxPos.length > 0) {
       out += `\n\nOUTPUT LIST — ${active.band || "Untitled"}\n`;
-      out += `\n#   ${pad("OUTPUT CHANNEL", 20)}${pad("SUBMIX", 16)}${pad("ENDPOINT", 20)}${pad("SB", 8)}NOTES\n`;
+      out += `\n#   ${pad("OUTPUT CHANNEL", 20)}${pad("SUBMIX", 16)}${pad("ENDPOINT", 20)}${pad("OUT", 10)}${hasOutputReturns ? pad("RTN", 10) : ""}NOTES\n`;
       out += "—".repeat(88) + "\n";
       outputsWithBoxPos.forEach((o, i) => {
-        out += `${pad(i + 1, 4)}${pad(o.outputChannel, 20)}${pad(o.submixName, 16)}${pad(o.endpoint, 20)}${pad(outputBoxLabel(o), 8)}${o.notes || ""}\n`;
+        out += `${pad(i + 1, 4)}${pad(o.outputChannel, 20)}${pad(o.submixName, 16)}${pad(o.endpoint, 20)}${pad(outputBoxLabel(o), 10)}${hasOutputReturns ? pad(outputReturnLabel(o), 10) : ""}${o.notes || ""}\n`;
       });
       if (outputDupes.length)
         out += `⚠ BOX DUPES: ${outputDupes.map(([, label, os]) => `${label} → output ${os.join(" & ")}`).join(", ")}\n`;
@@ -1361,9 +1388,12 @@ export default function StageAdvance() {
   const channelExportRows = () => channelsWithBoxPos.map((c, i) => [
     i + 1, c.name, c.mic, c.stand === "None" ? "" : c.stand, c.phantom ? "48V" : "", c.note || "", c.position || "", boxLabel(c),
   ]);
-  const OUTPUT_EXPORT_COLUMNS = ["#", "Output Channel", "Submix", "Stereo Link", "Endpoint", "Notes", "Stage Box"];
+  // the Stage Box Return column only exists when at least one output uses it,
+  // so exports for everyone else are unchanged
+  const outputExportColumns = () => ["#", "Output Channel", "Submix", "Stereo Link", "Endpoint", "Notes", OUT_COL_CONSOLE, ...(hasOutputReturns ? [OUT_COL_RETURN] : [])];
   const outputExportRows = () => outputsWithBoxPos.map((o, i) => [
     i + 1, o.outputChannel, o.submixName, o.linkedDown ? "linked ↓" : "", o.endpoint, o.notes || "", outputBoxLabel(o),
+    ...(hasOutputReturns ? [outputReturnLabel(o)] : []),
   ]);
   const exportFilenameBase = () =>
     `stageadvance-${(active.band || "show").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "show"}`;
@@ -1382,7 +1412,7 @@ export default function StageAdvance() {
   };
 
   const exportOutputsCsv = () => {
-    const csv = toCsv([OUTPUT_EXPORT_COLUMNS, ...outputExportRows()]);
+    const csv = toCsv([outputExportColumns(), ...outputExportRows()]);
     downloadBlob(new Blob([csv], { type: "text/csv" }), `${exportFilenameBase()}-output-list.csv`);
   };
 
@@ -1392,7 +1422,7 @@ export default function StageAdvance() {
     const inputSheet = XLSX.utils.aoa_to_sheet([EXPORT_COLUMNS, ...channelExportRows()]);
     XLSX.utils.book_append_sheet(wb, inputSheet, "Input List");
     if (outputsWithBoxPos.length > 0) {
-      const outputSheet = XLSX.utils.aoa_to_sheet([OUTPUT_EXPORT_COLUMNS, ...outputExportRows()]);
+      const outputSheet = XLSX.utils.aoa_to_sheet([outputExportColumns(), ...outputExportRows()]);
       XLSX.utils.book_append_sheet(wb, outputSheet, "Output List");
     }
     const buf = XLSX.write(wb, { type: "array", bookType: "xlsx" });
@@ -1423,6 +1453,7 @@ export default function StageAdvance() {
         <td>${esc(o.endpoint)}</td>
         <td>${esc(o.notes)}</td>
         <td style="width:auto">${o.boxId && outputBoxById(o.boxId) ? `<span class="sw" style="background:${outputBoxById(o.boxId).color}"></span>` : ""}${esc(outputBoxLabel(o))}</td>
+        ${hasOutputReturns ? `<td style="width:auto">${o.rtnBoxId && outputBoxById(o.rtnBoxId) && o._rtnPos != null ? `<span class="sw" style="background:${outputBoxById(o.rtnBoxId).color}"></span>` : ""}${esc(outputReturnLabel(o))}</td>` : ""}
       </tr>`).join("");
 
     /* The show header (band + meta) lives inside each section's <thead>
@@ -1450,9 +1481,9 @@ export default function StageAdvance() {
     const outputSection = outputsWithBoxPos.length === 0 ? "" : `
       <div style="break-before:page; page-break-before:always;">
         <table>
-          ${theadHtml("Output List", "<th>#</th><th>Output Channel</th><th>Submix</th><th>Endpoint</th><th>Notes</th><th>Stage Box or Physical Outs</th>", 6)}
+          ${theadHtml("Output List", `<th>#</th><th>Output Channel</th><th>Submix</th><th>Endpoint</th><th>Notes</th><th>${OUT_COL_CONSOLE}</th>${hasOutputReturns ? `<th>${OUT_COL_RETURN}</th>` : ""}`, hasOutputReturns ? 7 : 6)}
           <tbody>
-            ${outputDupes.length ? `<tr><td class="nb" colspan="6"><div class="alert">⚠ BOX CONFLICTS: ${outputDupes.map(([, label, os]) => `${label} → output ${os.join(" & ")}`).join(" · ")}</div></td></tr>` : ""}
+            ${outputDupes.length ? `<tr><td class="nb" colspan="${hasOutputReturns ? 7 : 6}"><div class="alert">⚠ BOX CONFLICTS: ${outputDupes.map(([, label, os]) => `${label} → output ${os.join(" & ")}`).join(" · ")}</div></td></tr>` : ""}
             ${outputRows}
           </tbody>
         </table>
@@ -1624,13 +1655,13 @@ ${gearSection}
     .sa-colhead { display:grid; grid-template-columns: 22px 34px 6px 1.3fr 1.2fr 0.9fr 44px 1.2fr 100px 100px 88px; gap:8px; padding:4px 8px; font-size:10px; text-transform:uppercase; letter-spacing:.1em; color:#5a5f6a; }
     /* ——— Output list — same row conventions as the input list (.sa-ch),
        fewer/different columns. ——— */
-    .sa-out { display:grid; grid-template-columns: 22px 30px 1.1fr 1.1fr 1.2fr 1.2fr 100px 130px; gap:8px; align-items:center; padding:6px 8px; border-bottom:1px solid #26282f; }
+    .sa-out { display:grid; grid-template-columns: 22px 30px 1.1fr 1.1fr 1.2fr 1.2fr 100px 100px 130px; gap:8px; align-items:center; padding:6px 8px; border-bottom:1px solid #26282f; }
     .sa-out:nth-child(odd of .sa-out) { background:#1c1e23; }
     .sa-out.drag-over { border-top:2px solid #E8B93E; }
     .sa-out.dragging { opacity:.35; }
     .sa-out:focus-within { background:#20242b; box-shadow: inset 3px 0 0 #E8B93E; }
     .sa-out input, .sa-out select { background:#17181c; border:1px solid #2c2f37; color:#e7e6e2; border-radius:5px; padding:5px 7px; font-size:13px; width:100%; box-sizing:border-box; }
-    .sa-out-colhead { display:grid; grid-template-columns: 22px 30px 1.1fr 1.1fr 1.2fr 1.2fr 100px 130px; gap:8px; padding:4px 8px; font-size:10px; text-transform:uppercase; letter-spacing:.1em; color:#5a5f6a; }
+    .sa-out-colhead { display:grid; grid-template-columns: 22px 30px 1.1fr 1.1fr 1.2fr 1.2fr 100px 100px 130px; gap:8px; padding:4px 8px; font-size:10px; text-transform:uppercase; letter-spacing:.1em; color:#5a5f6a; }
     .sa-link-btn.on { background:#4E8FD1; border-color:#4E8FD1; color:#fff; }
     .sa-fieldlabel { display:none; font-size:9px; text-transform:uppercase; letter-spacing:.06em; color:#8a8f98; margin-bottom:2px; }
     .sa-sb.override { border-color:#E8B93E !important; color:#E8B93E; font-weight:800; }
@@ -1667,7 +1698,7 @@ ${gearSection}
          preserve, so favor legibility over density here. */
       .sa-out { grid-template-columns: 18px 24px 1fr; grid-auto-rows:auto; }
       .sa-out-colhead { display:none; }
-      .sa-out .m-submixwrap, .sa-out .m-endpointwrap, .sa-out .m-outnotewrap, .sa-out .m-outsbwrap, .sa-out .sa-rowbtns { grid-column: 1 / -1; }
+      .sa-out .m-submixwrap, .sa-out .m-endpointwrap, .sa-out .m-outnotewrap, .sa-out .m-outsbwrap, .sa-out .m-outrtnwrap, .sa-out .sa-rowbtns { grid-column: 1 / -1; }
     }
     /* ——— PRINT: hide the app, show the crew sheet ——— */
     .print-sheet { display:none; }
@@ -2914,8 +2945,10 @@ ${gearSection}
       {showOutputBoxPanel && (
         <div className="no-print" style={{ background: "#17181c", border: "1px solid #2c2f37", borderRadius: 8, padding: 12 }}>
           <div className="sa-sub" style={{ marginBottom: 10, fontSize: 12 }}>
-            Named, colored patch destinations for outputs — e.g. AES, Dante, a specific snake.
-            Anything not assigned to one of these defaults to "Local" (the console's own analog outs).
+            Named, colored boxes for outputs. Use one for a digital snake (AES, Dante), or for an analog
+            stage box whose returns you want to label (choose it in the Stage Box Return column, and set
+            Letters if its jacks are lettered). An output with no Console Output box defaults to "Local",
+            the console's own outputs.
           </div>
           {outputBoxes.map((b) => (
             <div key={b.id} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
@@ -3005,7 +3038,7 @@ ${gearSection}
           <div className="sa-mono">
             <div className="sa-out-colhead">
               <div></div><div>#</div><div>Output Channel</div><div>Submix</div>
-              <div>Endpoint</div><div>Notes</div><div>Stage Box or Physical Outs</div><div></div>
+              <div>Endpoint</div><div>Notes</div><div>{OUT_COL_CONSOLE}</div><div>{OUT_COL_RETURN}</div><div></div>
             </div>
             {outputsWithBoxPos.map((o, i) => {
               const isLinkedPartner = i > 0 && outputsWithBoxPos[i - 1].linkedDown;
@@ -3071,7 +3104,7 @@ ${gearSection}
                       onChange={(e) => updateOutput(o.id, { notes: e.target.value })} />
                   </div>
                   <div className="m-outsbwrap">
-                    <span className="sa-fieldlabel">Stage box</span>
+                    <span className="sa-fieldlabel">{OUT_COL_CONSOLE}</span>
                     <select className="sa-input"
                       style={{
                         marginBottom: 4, fontWeight: 800,
@@ -3096,6 +3129,36 @@ ${gearSection}
                         <option key={n} value={n}>{positionText(n, outputBoxById(o._boxId)?.lineStyle)}</option>
                       ))}
                     </select>
+                  </div>
+                  <div className="m-outrtnwrap">
+                    <span className="sa-fieldlabel">{OUT_COL_RETURN}</span>
+                    <select className="sa-input"
+                      title="Optional: which stage box return this comes up on"
+                      style={{
+                        marginBottom: 4, fontWeight: 800,
+                        ...(o.rtnBoxId && outputBoxById(o.rtnBoxId)
+                          ? { background: outputBoxById(o.rtnBoxId).color, color: readableTextColor(outputBoxById(o.rtnBoxId).color), borderColor: outputBoxById(o.rtnBoxId).color }
+                          : { color: "#8a8f98" }),
+                      }}
+                      value={o.rtnBoxId || ""}
+                      onChange={(e) => updateOutput(o.id, { rtnBoxId: e.target.value || null, rtnPos: null })}>
+                      <option value="" style={{ background: "#17181c", color: "#8a8f98" }}>None</option>
+                      {outputBoxes.map((b) => (
+                        <option key={b.id} value={b.id} style={{ background: b.color, color: readableTextColor(b.color) }}>{b.name}</option>
+                      ))}
+                    </select>
+                    {o.rtnBoxId && outputBoxById(o.rtnBoxId) && (
+                      <select
+                        className={`sa-sb m-sb${outputDupeSet.has(`rtn:${o.rtnBoxId}:${o._rtnPos}`) ? " dupe" : o.rtnPos != null ? " override" : ""}`}
+                        title="Which jack on that box (defaults to order in the list)"
+                        value={o.rtnPos ?? ""}
+                        onChange={(e) => updateOutput(o.id, { rtnPos: e.target.value === "" ? null : Number(e.target.value) })}>
+                        <option value="">{positionText(o._rtnPos, outputBoxById(o.rtnBoxId)?.lineStyle)} ·auto</option>
+                        {Array.from({ length: 48 }, (_, n) => n + 1).map((n) => (
+                          <option key={n} value={n}>{positionText(n, outputBoxById(o.rtnBoxId)?.lineStyle)}</option>
+                        ))}
+                      </select>
+                    )}
                   </div>
                   <div className="sa-rowbtns no-print">
                     <button title="Link with next row as a stereo pair" disabled={i === outputsWithBoxPos.length - 1 && !o.linkedDown}
@@ -3250,15 +3313,16 @@ ${gearSection}
         <div style={{ breakBefore: "page", pageBreakBefore: "always" }}>
           <table className="ps-table">
             <thead>
-              {psHeader("Output List", 6)}
+              {psHeader("Output List", hasOutputReturns ? 7 : 6)}
               <tr>
-                <th>#</th><th>Output Channel</th><th>Submix</th><th>Endpoint</th><th>Notes</th><th>Stage Box or Physical Outs</th>
+                <th>#</th><th>Output Channel</th><th>Submix</th><th>Endpoint</th><th>Notes</th><th>{OUT_COL_CONSOLE}</th>
+                {hasOutputReturns && <th>{OUT_COL_RETURN}</th>}
               </tr>
             </thead>
             <tbody>
               {outputDupes.length > 0 && (
                 <tr>
-                  <td className="ps-nb" colSpan={6}>
+                  <td className="ps-nb" colSpan={hasOutputReturns ? 7 : 6}>
                     <div className="ps-alert">
                       ⚠ BOX CONFLICTS: {outputDupes.map(([, label, os]) => `${label} → output ${os.join(" & ")}`).join(" · ")}
                     </div>
@@ -3278,6 +3342,14 @@ ${gearSection}
                     )}
                     {outputBoxLabel(o)}
                   </td>
+                  {hasOutputReturns && (
+                    <td style={{ width: "auto" }}>
+                      {o.rtnBoxId && outputBoxById(o.rtnBoxId) && o._rtnPos != null && (
+                        <span className="ps-swatch" style={{ background: outputBoxById(o.rtnBoxId).color }} />
+                      )}
+                      {outputReturnLabel(o)}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

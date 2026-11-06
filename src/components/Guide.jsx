@@ -166,10 +166,9 @@ export default function Guide() {
           like <code>A3</code> or <code>Rack 1-2</code>. A one-letter box name keeps the compact style
           (<code>A3</code>); any other name gets a hyphen so nothing runs together (a box called "Box 1" prints
           <code> Box 1-1</code>, <code>Box 1-2</code>, not "Box 11", "Box 12"). Each box also has a <b>numbering
-          style</b>: <b>Numbers</b> (1, 2, 3…) or <b>Letters</b> (A, B, C…), for gear whose jacks are lettered. For
-          example, an analog stage box with 16 inputs and 8 returns labeled A to H: make one box for the inputs
-          (numbers) and one for the returns (letters) at the same stage position, and your outputs print as
-          <code> Returns-A</code>, <code>Returns-B</code> and so on, matching the labels on the hardware.</p>
+          style</b>: <b>Numbers</b> (1, 2, 3…, the default) or <b>Letters</b> (A, B, C…), for gear whose jacks are
+          lettered. Lettered jacks are most common on analog stage boxes, so you'll mostly use them for output
+          returns — see <Jump id="outputs">Outputs</Jump>.</p>
         <p className="sa-sub"><b>Reordering, duplicating, shortcuts</b> — every row has ⧉ (duplicate),
           ↑/↓ (move), and ✕ (remove) buttons — the reliable way to reorder on a phone or tablet,
           since drag-and-drop needs a mouse. On desktop you can also drag a row by its ⠿ handle, or
@@ -203,9 +202,21 @@ export default function Guide() {
         <p className="sa-sub"><b>Endpoint</b> — pick from <b>Your endpoint inventory</b> (see below)
           or type one in on the spot with "Other / type in…", same rental-style escape hatch as
           mics.</p>
-        <p className="sa-sub">Each output line also gets Submix, Notes, Stage Box (its own Boxes
-          panel, separate from the input list's), and the same ⧉ duplicate / ↑↓ move / ✕ remove
-          buttons and keyboard shortcuts as the input list.</p>
+        <p className="sa-sub"><b>Console Output</b> — where that output channel is assigned on the
+          console. It defaults to <b>Local</b>, meaning the console's own physical output, and you set the
+          number (so Main L on output 15 prints <code>Local-15</code>). Pick a box instead for a digital
+          snake, such as AES or Dante.</p>
+        <p className="sa-sub"><b>Stage Box Return</b> (optional) — for an analog snake and stage box, which
+          jack that signal comes up on. Create the stage box under <b>Output Boxes</b>, set its numbering
+          to <b>Letters</b> if its returns are lettered (A to H, say), then choose it in this column; the
+          letters fill in by list order and you can change any of them. For example, Mon 1 leaves the
+          console at <code>Local-1</code>, goes into snake channel C, and comes up on the stage box as
+          <code> Seismic-C</code>, where the wedge plugs in. The column only appears on your printouts and
+          exports if you've used it on at least one output, and a jack can't be given to two outputs (you'll
+          get a conflict warning if you try).</p>
+        <p className="sa-sub">Each output line also gets Submix and Notes, and the same ⧉ duplicate /
+          ↑↓ move / ✕ remove buttons and keyboard shortcuts as the input list. Output Boxes are their own
+          list, separate from the input list's boxes.</p>
         <p className="sa-sub">When you're done: <b>Export Outputs CSV</b> (shown once you have at
           least one output) downloads just the output list; it's also included automatically in
           <b> Export XLSX</b> and <b>Print crew sheet</b> alongside the input list.</p>
