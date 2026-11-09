@@ -174,8 +174,19 @@ export default function Guide() {
           since drag-and-drop needs a mouse. On desktop you can also drag a row by its ⠿ handle, or
           select a row (click or tab into it) and use <code>D</code> to duplicate, <code>Alt/⌥+↑/↓</code>{" "}
           to move it, and <code>Esc</code> to close an open color picker.</p>
+        <p className="sa-sub"><b>Working on several channels at once</b> — tick the box next to the channel
+          number on any rows (shift-click to select a range), or use the <b>Select a group</b> buttons above the
+          list to grab a whole instrument group in one click (all your percussion, say). The checkbox at the
+          top of the column selects or clears every row. An action bar
+          appears with how many are selected. Drag any ticked row's ⠿ handle to move <i>all</i> of them
+          together, or use the bar to nudge them <b>↑ Up / ↓ Down</b>, put them in a <b>stage box</b> in one
+          go (they number themselves in list order), or give them one <b>color</b>. <b>Clear</b> unticks
+          everything. On desktop, Alt/⌥+↑/↓ on a ticked row moves the whole selection too.</p>
         <p className="sa-sub"><b>Sort by group</b> arranges channels in console order — drums →
-          perc → bass → guitars → keys → strings/horns → vocals → playback.</p>
+          perc → bass → guitars → keys → strings/horns → vocals → playback. It's not permanent: right after
+          sorting, the button becomes <b>↩ Unsort</b>, and clicking it puts the channels back in the order they
+          were in before. Unsort stays available if you add or remove channels, but once you move rows around
+          by hand it goes back to "Sort by group", so it never undoes your own arranging.</p>
         <p className="sa-sub">When you're done: <b>Copy as text</b> puts a plain-text input list,
           mic pull, and stand count on your clipboard; <b>Export CSV</b> downloads the input list as
           a file; <b>Export XLSX</b> downloads the input list <i>and</i> output list (if you have

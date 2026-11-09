@@ -9,6 +9,8 @@ import { createShowsSync } from "./lib/showsSync";
 import RestoreBackup from "./components/RestoreBackup";
 import { boxPositionLabel, positionText, POS_STYLES } from "./lib/boxLabels";
 import { withOutputPositions, OUTPUT_LOCAL_BOX } from "./lib/outputPositions";
+import { moveBlockTo, moveBlockBy, rangeIds, patchSelected } from "./lib/blockMove";
+import { applySort, isSortedState, undoSort } from "./lib/sortToggle";
 import { lookupMicLibrary, cacheMicLibraryEntry, fetchAiTagsForMic } from "./lib/micLibrary";
 import { resolveOwnerBySlug, updateMyProfile } from "./lib/profile";
 import { exportMyData, deleteMyAccount } from "./lib/account";
@@ -488,6 +490,8 @@ export default function StageAdvance() {
   const [deleteErr, setDeleteErr] = useState("");
   const [accountDeleted, setAccountDeleted] = useState(false);
   const [dragIdx, setDragIdx] = useState(null);
+  const [selectedChIds, setSelectedChIds] = useState([]); // multi-select on the input list (ids)
+  const selAnchorRef = useRef(null); // last ticked row, for shift-click ranges
   const [openColorPickerId, setOpenColorPickerId] = useState(null);
   const [openGroupPickerFor, setOpenGroupPickerFor] = useState(null);
   const [overIdx, setOverIdx] = useState(null);
@@ -992,6 +996,40 @@ export default function StageAdvance() {
     updateShow({ channels: arr });
   };
 
+  /* ——— Multi-select on the input list (requested by a beta tester who had
+     to move 8 percussion channels one at a time). Tick rows, then drag any
+     ticked row's handle to move them all, or use the action bar to move
+     them up/down, put them in a stage box, or color them in one go. Every
+     batch edit is ONE updateShow call, so it saves as one change. ——— */
+  const channelIdsNow = active ? active.channels.map((c) => c.id) : [];
+  const selSet = new Set(selectedChIds.filter((id) => channelIdsNow.includes(id))); // drops ids of removed rows
+  const selIds = active ? active.channels.filter((c) => selSet.has(c.id)).map((c) => c.id) : []; // in list order
+  // true while a ticked row is being dragged and more than one row is ticked: the whole selection moves
+  const blockDragging = dragIdx !== null && selSet.size > 1 && Boolean(active?.channels[dragIdx] && selSet.has(active.channels[dragIdx].id));
+  const clearSelection = () => { setSelectedChIds([]); selAnchorRef.current = null; };
+  useEffect(() => { setSelectedChIds([]); selAnchorRef.current = null; }, [activeId]);
+
+  const toggleSelect = (id, shiftKey) => {
+    if (shiftKey && selAnchorRef.current && channelIdsNow.includes(selAnchorRef.current)) {
+      const range = rangeIds(active.channels, selAnchorRef.current, id);
+      setSelectedChIds(Array.from(new Set([...selIds, ...range])));
+    } else {
+      setSelectedChIds(selSet.has(id) ? selIds.filter((x) => x !== id) : [...selIds, id]);
+    }
+    selAnchorRef.current = id;
+  };
+  const selectGroupRows = (group) => {
+    setSelectedChIds(active.channels.filter((c) => group === "__all" || c.group === group).map((c) => c.id));
+  };
+  const dropSelectedBlock = (grabbedId, targetId) => {
+    updateShow({ channels: moveBlockTo(active.channels, selIds, grabbedId, targetId) });
+  };
+  const moveSelected = (dir) => updateShow({ channels: moveBlockBy(active.channels, selIds, dir) });
+  const setSelectedBox = (boxId) =>
+    updateShow({ channels: patchSelected(active.channels, selIds, { boxId: boxId || null, boxPos: null }) });
+  const setSelectedColor = (hex) =>
+    updateShow({ channels: patchSelected(active.channels, selIds, { color: hex || null }) });
+
   /* ——— Outputs: same row-level conventions as the input list (add,
      duplicate, move, drag), but its own list and its own box pool —
      an output's physical patch destination (AES/Dante/analog local
@@ -1184,7 +1222,8 @@ export default function StageAdvance() {
         const dir = e.key === "ArrowUp" ? -1 : 1;
         if (chId) {
           const idx = active.channels.findIndex((c) => c.id === chId);
-          if (idx !== -1) moveChannel(idx, dir);
+          if (selSet.size > 1 && selSet.has(chId)) moveSelected(dir);
+          else if (idx !== -1) moveChannel(idx, dir);
         } else {
           const idx = outputs.findIndex((o) => o.id === outId);
           if (idx !== -1) moveOutput(idx, dir);
@@ -1199,9 +1238,17 @@ export default function StageAdvance() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [mode, active, openColorPickerId]);
+  }, [mode, active, openColorPickerId, selectedChIds]);
 
-  const sortByGroup = () => updateShow({ channels: groupSort(active.channels) });
+  /* Sort by group is undoable: the order from before the sort is saved on the
+     show (sortSnapshot), and the button turns into "Unsort" while the list is
+     still in that sorted state. See lib/sortToggle.js for the rules. */
+  const listIsSorted = isSortedState(active?.channels || [], active?.sortSnapshot);
+  const sortByGroup = () => {
+    const { channels, snapshot } = applySort(active.channels, groupSort);
+    updateShow({ channels, sortSnapshot: snapshot });
+  };
+  const unsortChannels = () => updateShow({ channels: undoSort(active.channels, active.sortSnapshot), sortSnapshot: null });
 
   const startNewShow = () => {
     const s = newShow();
@@ -1225,6 +1272,7 @@ export default function StageAdvance() {
       band: src.band ? `${src.band} (copy)` : "Untitled (copy)",
       date: "", // new gig, new date — everything else carries over
       channels: src.channels.map((c) => ({ ...c, id: uid() })),
+      sortSnapshot: null,
       updated: Date.now(),
     };
     setShows((p) => [copy, ...p]);
@@ -1610,7 +1658,7 @@ ${gearSection}
     .sa-chip { border:none; border-radius:5px; padding:5px 10px; font-size:12px; font-weight:700; cursor:pointer; opacity:.92; }
     .sa-chip:hover { opacity:1; transform: translateY(-1px); }
     .sa-groupname { font-size:11px; text-transform:uppercase; letter-spacing:.12em; color:#8a8f98; margin:10px 0 5px; }
-    .sa-ch { display:grid; grid-template-columns: 22px 34px 16px 1.3fr 1.2fr 0.9fr 44px 1.2fr 100px 100px 88px; gap:8px; align-items:center; padding:6px 8px; border-bottom:1px solid #26282f; border-top:2px solid transparent; }
+    .sa-ch { display:grid; grid-template-columns: 22px 52px 16px 1.3fr 1.2fr 0.9fr 44px 1.2fr 100px 100px 88px; gap:8px; align-items:center; padding:6px 8px; border-bottom:1px solid #26282f; border-top:2px solid transparent; }
     .sa-ch:nth-child(odd of .sa-ch) { background:#1c1e23; }
     .sa-ch.drag-over { border-top:2px solid #E8B93E; }
     .sa-ch.dragging { opacity:.35; }
@@ -1623,6 +1671,12 @@ ${gearSection}
     .sa-handle:active { cursor:grabbing; }
     .sa-handle:focus-visible { outline:2px solid #E8B93E; outline-offset:1px; color:#e7e6e2; }
     .sa-chnum { font-weight:800; font-size:15px; text-align:right; color:#8a8f98; }
+    .sa-chsel { display:flex; align-items:center; justify-content:flex-end; gap:6px; }
+    .sa-chsel > span { min-width:22px; text-align:right; }
+    .sa-chsel input[type=checkbox] { width:15px; height:15px; margin:0; cursor:pointer; accent-color:#E8B93E; flex-shrink:0; }
+    .sa-ch.selected { background:#2a2618 !important; box-shadow: inset 3px 0 0 #E8B93E; }
+    .sa-selbar { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin:6px 0 8px; }
+    .sa-actionbar { position:sticky; top:8px; z-index:20; display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:0 0 10px; padding:8px 10px; background:#2a2618; border:1px solid #E8B93E; border-radius:8px; box-shadow:0 4px 14px rgba(0,0,0,.45); }
     .sa-strip { width:16px; height:30px; border-radius:2px; padding:0; cursor:pointer; }
     .sa-swatchgrid { display:grid; grid-template-columns: repeat(6, 20px); gap:6px; }
     .sa-swatch { width:20px; height:20px; border-radius:4px; border:1px solid rgba(255,255,255,.15); cursor:pointer; padding:0; }
@@ -1652,7 +1706,7 @@ ${gearSection}
     .sa-privacy { background:#20242b; border:1px solid #3a3e48; color:#8a8f98; border-radius:8px; padding:9px 13px; font-size:12px; }
     .sa-member { display:grid; grid-template-columns: 1.2fr 1.2fr 1fr 36px; gap:8px; align-items:end; padding:8px 0; border-bottom:1px dashed #2c2f37; }
     .sa-empty { text-align:center; color:#8a8f98; padding:40px 20px; }
-    .sa-colhead { display:grid; grid-template-columns: 22px 34px 6px 1.3fr 1.2fr 0.9fr 44px 1.2fr 100px 100px 88px; gap:8px; padding:4px 8px; font-size:10px; text-transform:uppercase; letter-spacing:.1em; color:#5a5f6a; }
+    .sa-colhead { display:grid; grid-template-columns: 22px 52px 6px 1.3fr 1.2fr 0.9fr 44px 1.2fr 100px 100px 88px; gap:8px; padding:4px 8px; font-size:10px; text-transform:uppercase; letter-spacing:.1em; color:#5a5f6a; }
     /* ——— Output list — same row conventions as the input list (.sa-ch),
        fewer/different columns. ——— */
     .sa-out { display:grid; grid-template-columns: 22px 30px 1.1fr 1.1fr 1.2fr 1.2fr 100px 100px 130px; gap:8px; align-items:center; padding:6px 8px; border-bottom:1px solid #26282f; }
@@ -1671,8 +1725,10 @@ ${gearSection}
     .sa-check input { width:17px; height:17px; accent-color:#E8B93E; }
     h2.sa-h2 { font-size:14px; text-transform:uppercase; letter-spacing:.14em; color:#e7e6e2; margin:0 0 12px; font-weight:800; }
     @media (max-width: 780px) {
-      .sa-ch { grid-template-columns: 18px 26px 28px 1fr 1fr 40px; grid-auto-rows:auto; }
+      .sa-ch { grid-template-columns: 18px 46px 28px 1fr 1fr 40px; grid-auto-rows:auto; }
       .sa-colhead { display:none; }
+      .sa-actionbar .sa-hint { display:none; }
+      .sa-actionbar { gap:6px; padding:6px 8px; }
       /* Source name and Mic/DI were forced into two cramped half-width
          columns here, clipping mic names — give each its own full-
          width row like every other field in this card. */
@@ -2701,10 +2757,17 @@ ${gearSection}
           ⌨ Shortcuts {showShortcutsPanel ? "▴" : "▾"}
         </button>
         {active.channels.length > 1 && (
-          <button className="sa-btn" onClick={sortByGroup}
-            title="Arrange in console order: drums → perc → bass → guitars → keys → strings/horns → vocals → playback">
-            Sort by group
-          </button>
+          listIsSorted ? (
+            <button className="sa-btn" onClick={unsortChannels}
+              title="Put the channels back in the order they were in before you sorted">
+              ↩ Unsort
+            </button>
+          ) : (
+            <button className="sa-btn" onClick={sortByGroup}
+              title="Arrange in console order: drums → perc → bass → guitars → keys → strings/horns → vocals → playback. You can undo it with Unsort.">
+              Sort by group
+            </button>
+          )
         )}
       </div>
 
@@ -2769,22 +2832,70 @@ ${gearSection}
       {/* Input list */}
       <div className="sa-card">
         <h2 className="sa-h2">Input list — {active.channels.length} channels</h2>
+        {active.channels.length > 1 && (
+          <div className="sa-selbar no-print">
+            <span className="sa-sub" style={{ fontSize: 12 }}>Select a group:</span>
+            {Array.from(new Set(active.channels.map((c) => c.group))).map((g) => (
+              <button key={g} className="sa-btn ghost" style={{ fontSize: 12, padding: "3px 8px" }} onClick={() => selectGroupRows(g)}>{g}</button>
+            ))}
+            <span className="sa-sub" style={{ fontSize: 11 }}>or tick rows (shift-click for a range; top checkbox = all)</span>
+          </div>
+        )}
+        {selIds.length > 0 && (
+          <div className="sa-actionbar no-print">
+            <b style={{ whiteSpace: "nowrap" }}>{selIds.length} selected</b>
+            <span className="sa-sub sa-hint" style={{ fontSize: 12 }}>drag any ticked row's ⠿ to move them all, or:</span>
+            <button className="sa-btn" onClick={() => moveSelected(-1)} title="Move the selected rows up one place">↑ Up</button>
+            <button className="sa-btn" onClick={() => moveSelected(1)} title="Move the selected rows down one place">↓ Down</button>
+            <select className="sa-input" style={{ width: "auto", minWidth: 130 }} value="" disabled={boxes.length === 0}
+              title={boxes.length === 0 ? "Create a box first (Boxes button above)" : "Put the selected rows in a stage box"}
+              onChange={(e) => { if (e.target.value !== "") setSelectedBox(e.target.value === "__none" ? null : e.target.value); }}>
+              <option value="">{boxes.length === 0 ? "Stage box: (none yet)" : "Stage box…"}</option>
+              {boxes.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+              {boxes.length > 0 && <option value="__none">Remove from box</option>}
+            </select>
+            <div style={{ position: "relative" }}>
+              <button className="sa-btn" onClick={() => setOpenColorPickerId(openColorPickerId === "__batch" ? null : "__batch")}
+                title="Set one color for the selected rows">Color…</button>
+              {openColorPickerId === "__batch" && (
+                <>
+                  <div className="sa-swatch-overlay" onClick={() => setOpenColorPickerId(null)} />
+                  <div className="sa-swatch-popover">
+                    <ColorSwatchPicker value={"#8a8f98"}
+                      onChange={(hex) => setSelectedColor(hex)}
+                      onReset={() => setSelectedColor(null)}
+                      onClose={() => setOpenColorPickerId(null)} />
+                  </div>
+                </>
+              )}
+            </div>
+            <button className="sa-btn ghost" onClick={clearSelection}>Clear</button>
+          </div>
+        )}
         {active.channels.length === 0 ? (
           <div className="sa-empty">Tap instruments above to start the patch.</div>
         ) : (
           <div className="sa-mono">
             <div className="sa-colhead">
-              <div></div><div>CH</div><div></div><div>Source</div><div>Mic / DI</div>
+              <div></div><div className="sa-chsel"><input type="checkbox" className="no-print" title="Select all / none"
+                checked={selIds.length > 0 && selIds.length === active.channels.length}
+                ref={(el) => { if (el) el.indeterminate = selIds.length > 0 && selIds.length < active.channels.length; }}
+                onChange={(e) => (e.target.checked ? selectGroupRows("__all") : clearSelection())} /><span>CH</span></div><div></div><div>Source</div><div>Mic / DI</div>
               <div>Stand</div><div>48V</div><div>Notes</div><div>Position</div><div>Stage Box or Physical Outs</div><div></div>
             </div>
             {channelsWithBoxPos.map((c, i) => (
               <div key={c.id} data-channel-id={c.id}
-                className={`sa-ch${overIdx === i && dragIdx !== null ? " drag-over" : ""}${dragIdx === i ? " dragging" : ""}${shortages.some(([k]) => k === c.mic) ? " short-row" : ""}`}
+                className={`sa-ch${overIdx === i && dragIdx !== null ? " drag-over" : ""}${dragIdx === i || (blockDragging && selSet.has(c.id)) ? " dragging" : ""}${selSet.has(c.id) ? " selected" : ""}${shortages.some(([k]) => k === c.mic) ? " short-row" : ""}`}
                 title={shortages.some(([k]) => k === c.mic) ? "Over inventory — swap the mic or tag it as a rental" : undefined}
                 onDragOver={(e) => { e.preventDefault(); if (overIdx !== i) setOverIdx(i); }}
-                onDrop={(e) => { e.preventDefault(); dropChannel(dragIdx, i); setDragIdx(null); setOverIdx(null); }}>
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (blockDragging) dropSelectedBlock(active.channels[dragIdx].id, c.id);
+                  else dropChannel(dragIdx, i);
+                  setDragIdx(null); setOverIdx(null);
+                }}>
                 <div className="sa-handle no-print" tabIndex={0}
-                  title="Drag to reorder · click or tab here to select this row for keyboard shortcuts"
+                  title={selSet.has(c.id) && selSet.size > 1 ? `Drag to move all ${selSet.size} selected rows` : "Drag to reorder · click or tab here to select this row for keyboard shortcuts"}
                   draggable
                   onDragStart={(e) => {
                     setDragIdx(i);
@@ -2793,7 +2904,12 @@ ${gearSection}
                     if (row && e.dataTransfer.setDragImage) e.dataTransfer.setDragImage(row, 20, 18);
                   }}
                   onDragEnd={() => { setDragIdx(null); setOverIdx(null); }}>⠿</div>
-                <div className="sa-chnum">{i + 1}</div>
+                <div className="sa-chnum sa-chsel">
+                  <input type="checkbox" className="no-print" checked={selSet.has(c.id)}
+                    title="Select this row (shift-click to select a range)"
+                    onChange={() => {}} onClick={(e) => toggleSelect(c.id, e.shiftKey)} />
+                  <span>{i + 1}</span>
+                </div>
                 <div style={{ position: "relative" }}>
                   <button type="button" className="sa-strip" style={{ background: channelColor(c), border: "none" }}
                     title={c.color ? "Channel color — click to change or reset to the group color (right-click also resets)" : "Channel color — click to override just this row"}
