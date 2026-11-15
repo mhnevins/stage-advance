@@ -9,7 +9,8 @@ import { createShowsSync } from "./lib/showsSync";
 import RestoreBackup from "./components/RestoreBackup";
 import { boxPositionLabel, positionText, POS_STYLES } from "./lib/boxLabels";
 import { withOutputPositions, OUTPUT_LOCAL_BOX } from "./lib/outputPositions";
-import { moveBlockTo, moveBlockBy, rangeIds, patchSelected } from "./lib/blockMove";
+import { moveBlockTo, moveBlockBy, rangeIds, patchSelected, moveBlockToPosition } from "./lib/blockMove";
+import { resolveChannelColor } from "./lib/channelColor";
 import { applySort, isSortedState, undoSort } from "./lib/sortToggle";
 import { lookupMicLibrary, cacheMicLibraryEntry, fetchAiTagsForMic } from "./lib/micLibrary";
 import { resolveOwnerBySlug, updateMyProfile } from "./lib/profile";
@@ -316,6 +317,8 @@ const blankForm = () => ({
 const GROUP_COLORS_KEY = "stage-advance:group-colors";
 const OUTPUT_CHIPS_KEY = "stage-advance:output-chips";
 const FB_GROUP_DISMISSED_KEY = "stage-advance:fb-group-dismissed";
+const TIP_ASK_DISMISSED_KEY = "stage-advance:tip-ask-dismissed";
+const KOFI_URL = "https://ko-fi.com/stageadvance";
 // Private Facebook group for StageAdvance users (updates, bug reports, ideas).
 const FB_GROUP_URL = "https://www.facebook.com/share/g/1MZnDC4k5y/";
 
@@ -500,6 +503,9 @@ export default function StageAdvance() {
   const [showOutputBoxPanel, setShowOutputBoxPanel] = useState(false);
   const [customOutputChips, setCustomOutputChips] = useState([]); // [{ id, name, stereo }], per account
   const [fbBannerDismissed, setFbBannerDismissed] = useState(true); // true until we know otherwise, so it never flashes
+  const [tipDismissed, setTipDismissed] = useState(true); // same idea: hidden until we know the person hasn't dismissed it
+  const [tipShowId, setTipShowId] = useState(null); // which show the tip line is currently showing under
+  const tipShownFor = useRef(new Set()); // at most one tip line per show per visit
   const [newChipName, setNewChipName] = useState("");
   const [newChipStereo, setNewChipStereo] = useState(false);
   const [endpointItems, setEndpointItems] = useState([]);
@@ -757,6 +763,12 @@ export default function StageAdvance() {
         if (!cancelled) setFbBannerDismissed(r?.value === "1");
       } catch (e) { /* can't tell — stay hidden rather than nag */ }
     })();
+    (async () => {
+      try {
+        const r = await storage.get(TIP_ASK_DISMISSED_KEY);
+        if (!cancelled) setTipDismissed(r?.value === "1");
+      } catch (e) { /* can't tell — stay hidden rather than nag */ }
+    })();
     loadInventory();
     loadEndpoints();
     return () => { cancelled = true; };
@@ -813,7 +825,8 @@ export default function StageAdvance() {
 
   const groupColor = (g) => groupColors[g] || GROUPS[g]?.color || "#999";
   const groupTextColor = (g) => (groupColors[g] ? readableTextColor(groupColors[g]) : GROUPS[g]?.text || "#e7e6e2");
-  const channelColor = (c) => c.color || groupColor(c.group);
+  // Left strip color: own color > stage box color (only if this show opted in) > group color. See lib/channelColor.js.
+  const channelColor = (c) => resolveChannelColor(c, active?.boxes, active?.colorByBox, groupColor);
 
   /* Shows are saved per show by showsSync.js — there is deliberately no
      "save the whole list whenever it changes" effect any more. That
@@ -1029,6 +1042,27 @@ export default function StageAdvance() {
     updateShow({ channels: patchSelected(active.channels, selIds, { boxId: boxId || null, boxPos: null }) });
   const setSelectedColor = (hex) =>
     updateShow({ channels: patchSelected(active.channels, selIds, { color: hex || null }) });
+  const setSelectedStand = (stand) =>
+    updateShow({ channels: patchSelected(active.channels, selIds, { stand }) });
+
+  /* Typing a channel number: click the number on a row, type where it should
+     go, Enter. If the row is one of several ticked rows the whole selection
+     moves (first ticked row lands on that number); otherwise just that row. */
+  const [editingNumId, setEditingNumId] = useState(null);
+  const [numDraft, setNumDraft] = useState("");
+  const editingNumRef = useRef(null); // guards against committing twice (Enter, then the box losing focus)
+  const startEditNumber = (id, current) => { editingNumRef.current = id; setEditingNumId(id); setNumDraft(String(current)); };
+  const cancelNumber = () => { editingNumRef.current = null; setEditingNumId(null); };
+  const commitNumber = (id) => {
+    if (editingNumRef.current !== id) return;
+    editingNumRef.current = null;
+    const n = Number(numDraft.trim());
+    setEditingNumId(null);
+    if (!numDraft.trim() || !Number.isFinite(n)) return;
+    const ids = selSet.size > 1 && selSet.has(id) ? selIds : [id];
+    const next = moveBlockToPosition(active.channels, ids, n);
+    if (next !== active.channels) updateShow({ channels: next });
+  };
 
   /* ——— Outputs: same row-level conventions as the input list (add,
      duplicate, move, drag), but its own list and its own box pool —
@@ -1411,6 +1445,20 @@ export default function StageAdvance() {
     return out;
   };
 
+  /* A quiet one-line tip ask, shown right after something useful comes out
+     (copy, export, print). At most once per show per visit, never blocks
+     anything, and gone for good once dismissed or clicked. */
+  const offerTip = () => {
+    if (tipDismissed || !active || tipShownFor.current.has(active.id)) return;
+    tipShownFor.current.add(active.id);
+    setTipShowId(active.id);
+  };
+  const dismissTip = () => {
+    setTipDismissed(true);
+    setTipShowId(null);
+    storage.set(TIP_ASK_DISMISSED_KEY, "1").catch(() => {});
+  };
+
   const copyList = async () => {
     const text = exportText();
     try { await navigator.clipboard.writeText(text); }
@@ -1424,6 +1472,7 @@ export default function StageAdvance() {
     }
     setCopied(true);
     setTimeout(() => setCopied(false), 1600);
+    offerTip();
   };
 
   /* ——— CSV/XLSX export: for engineers who want StageAdvance data in
@@ -1457,11 +1506,13 @@ export default function StageAdvance() {
   const exportCsv = () => {
     const csv = toCsv([EXPORT_COLUMNS, ...channelExportRows()]);
     downloadBlob(new Blob([csv], { type: "text/csv" }), `${exportFilenameBase()}-input-list.csv`);
+    offerTip();
   };
 
   const exportOutputsCsv = () => {
     const csv = toCsv([outputExportColumns(), ...outputExportRows()]);
     downloadBlob(new Blob([csv], { type: "text/csv" }), `${exportFilenameBase()}-output-list.csv`);
+    offerTip();
   };
 
   const exportXlsx = async () => {
@@ -1475,6 +1526,7 @@ export default function StageAdvance() {
     }
     const buf = XLSX.write(wb, { type: "array", bookType: "xlsx" });
     downloadBlob(new Blob([buf], { type: "application/octet-stream" }), `${exportFilenameBase()}.xlsx`);
+    offerTip();
   };
 
   /* ——— standalone crew sheet (opens in new tab; window.print is blocked in-app) ——— */
@@ -1619,6 +1671,7 @@ ${gearSection}
       setPrintMsg("Pop-up blocked — downloaded the sheet instead. Open it and print from there.");
       setTimeout(() => setPrintMsg(""), 6000);
     }
+    offerTip();
   };
 
   /* ——— form helpers ——— */
@@ -1673,6 +1726,9 @@ ${gearSection}
     .sa-chnum { font-weight:800; font-size:15px; text-align:right; color:#8a8f98; }
     .sa-chsel { display:flex; align-items:center; justify-content:flex-end; gap:6px; }
     .sa-chsel > span { min-width:22px; text-align:right; }
+    .sa-numbtn { cursor:text; border-bottom:1px dashed transparent; }
+    .sa-numbtn:hover { color:#e7e6e2; border-bottom-color:#8a8f98; }
+    .sa-numedit { width:44px !important; padding:3px 4px !important; text-align:right; font-weight:800; }
     .sa-chsel input[type=checkbox] { width:15px; height:15px; margin:0; cursor:pointer; accent-color:#E8B93E; flex-shrink:0; }
     .sa-ch.selected { background:#2a2618 !important; box-shadow: inset 3px 0 0 #E8B93E; }
     .sa-selbar { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin:6px 0 8px; }
@@ -1729,6 +1785,9 @@ ${gearSection}
       .sa-colhead { display:none; }
       .sa-actionbar .sa-hint { display:none; }
       .sa-actionbar { gap:6px; padding:6px 8px; }
+      .sa-actionbar b { flex:1 0 100%; }
+      .sa-actionbar select { flex:1 1 90px; min-width:0 !important; width:auto !important; }
+      .sa-actionbar .sa-btn { padding:6px 10px; }
       /* Source name and Mic/DI were forced into two cramped half-width
          columns here, clipping mic names — give each its own full-
          width row like every other field in this card. */
@@ -2051,10 +2110,10 @@ ${gearSection}
       ))}
 
       <div className="sa-sub" style={{ textAlign: "center", marginTop: 10, paddingTop: 16, borderTop: "1px dashed #2c2f37" }}>
-        Free to use. If StageAdvance saves you time,{" "}
-        <a href="https://ko-fi.com/stageadvance" target="_blank" rel="noopener noreferrer" style={{ color: "#E8B93E" }}>
-          support us on Ko-fi
-        </a>.
+        Free to use, and hosting runs about $37 a month. If StageAdvance saves you time,{" "}
+        <a href={KOFI_URL} target="_blank" rel="noopener noreferrer" style={{ color: "#E8B93E" }}>
+          a tip on Ko-fi
+        </a>{" "}(even $5) helps.
       </div>
     </div>
   );
@@ -2624,9 +2683,9 @@ ${gearSection}
       <div className="sa-card" style={{ textAlign: "center" }}>
         <h2 className="sa-h2">Support StageAdvance</h2>
         <div className="sa-sub" style={{ marginBottom: 14 }}>
-          StageAdvance is free to use. If it saves you time, voluntary support helps keep it running.
+          StageAdvance is free to use. Hosting and the database cost about $37 a month, paid by me. If it saves you time, even $5 helps cover that and funds new features.
         </div>
-        <a href="https://ko-fi.com/stageadvance" target="_blank" rel="noopener noreferrer"
+        <a href={KOFI_URL} target="_blank" rel="noopener noreferrer"
           className="sa-btn" style={{ padding: "10px 22px", fontSize: 14, textDecoration: "none", display: "inline-block" }}>
           ☕ Support us on Ko-fi
         </a>
@@ -2685,6 +2744,17 @@ ${gearSection}
         <button className="sa-btn" onClick={exportXlsx} title="Download the input list (and output list, if any) as a .xlsx file">Export XLSX</button>
         <button className="sa-btn" onClick={openPrintSheet}>Print crew sheet</button>
       </div>
+
+      {tipShowId === active.id && !tipDismissed && (
+        <div className="no-print" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 12px", border: "1px solid #2c2f37", borderRadius: 8, background: "#17181c" }}>
+          <div className="sa-sub" style={{ flex: 1, minWidth: 220, fontSize: 13 }}>
+            Saved you some prep time? StageAdvance is free, and hosting runs about $37 a month. If it's helped, a tip (even $5) keeps it going and helps decide what gets built next.
+          </div>
+          <a href={KOFI_URL} target="_blank" rel="noopener noreferrer" className="sa-btn" style={{ textDecoration: "none" }}
+            onClick={dismissTip}>☕ Leave a tip</a>
+          <button className="sa-btn ghost" onClick={dismissTip} aria-label="Dismiss" title="Don't show this again">✕</button>
+        </div>
+      )}
 
       {/* Show details */}
       <div className="sa-card">
@@ -2812,6 +2882,19 @@ ${gearSection}
             </div>
           ))}
           <button className="sa-btn" onClick={addBox}>+ Add box</button>
+          {boxes.length > 0 && (
+            <label style={{ display: "flex", alignItems: "flex-start", gap: 8, marginTop: 12, fontSize: 13, cursor: "pointer" }}>
+              <input type="checkbox" style={{ marginTop: 3, accentColor: "#E8B93E" }} checked={!!active.colorByBox}
+                onChange={(e) => updateShow({ colorByBox: e.target.checked })} />
+              <span>
+                Left color follows stage box
+                <span className="sa-sub" style={{ display: "block", fontSize: 12 }}>
+                  Off: the color bar on each row is the group color (drums, vocals…), as on a console. On: channels in a box
+                  show that box's color instead. A color you set on a single row always wins, and turning this off changes nothing permanently.
+                </span>
+              </span>
+            </label>
+          )}
         </div>
       )}
 
@@ -2824,6 +2907,7 @@ ${gearSection}
             <b>D</b><span>Duplicate the selected row</span>
             <b>{ALT_KEY_LABEL}{isMac ? "" : " "}↑ / ↓</b><span>Move the selected row up/down</span>
             <b>Tab / Shift+Tab</b><span>Move between fields</span>
+            <b>Click a channel number</b><span>Type a new number and press Enter to move the row there</span>
             <b>Esc</b><span>Close an open color picker</span>
           </div>
         </div>
@@ -2853,6 +2937,12 @@ ${gearSection}
               <option value="">{boxes.length === 0 ? "Stage box: (none yet)" : "Stage box…"}</option>
               {boxes.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
               {boxes.length > 0 && <option value="__none">Remove from box</option>}
+            </select>
+            <select className="sa-input" style={{ width: "auto", minWidth: 120 }} value=""
+              title="Set the same mic stand for the selected rows"
+              onChange={(e) => { if (e.target.value) setSelectedStand(e.target.value); }}>
+              <option value="">Stand…</option>
+              {STAND_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
             <div style={{ position: "relative" }}>
               <button className="sa-btn" onClick={() => setOpenColorPickerId(openColorPickerId === "__batch" ? null : "__batch")}
@@ -2908,11 +2998,24 @@ ${gearSection}
                   <input type="checkbox" className="no-print" checked={selSet.has(c.id)}
                     title="Select this row (shift-click to select a range)"
                     onChange={() => {}} onClick={(e) => toggleSelect(c.id, e.shiftKey)} />
-                  <span>{i + 1}</span>
+                  {editingNumId === c.id ? (
+                    <input className="sa-numedit no-print" autoFocus inputMode="numeric" value={numDraft}
+                      aria-label="Type the channel number to move this row to"
+                      onChange={(e) => setNumDraft(e.target.value.replace(/[^0-9]/g, ""))}
+                      onFocus={(e) => e.target.select()}
+                      onBlur={() => commitNumber(c.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") commitNumber(c.id);
+                        else if (e.key === "Escape") { e.stopPropagation(); cancelNumber(); }
+                      }} />
+                  ) : (
+                    <span className="sa-numbtn" title="Click, type a channel number, press Enter to move this row there"
+                      onClick={() => startEditNumber(c.id, i + 1)}>{i + 1}</span>
+                  )}
                 </div>
                 <div style={{ position: "relative" }}>
                   <button type="button" className="sa-strip" style={{ background: channelColor(c), border: "none" }}
-                    title={c.color ? "Channel color — click to change or reset to the group color (right-click also resets)" : "Channel color — click to override just this row"}
+                    title={c.color ? "Channel color — click to change or reset (right-click also resets)" : "Channel color — click to override just this row"}
                     onClick={() => setOpenColorPickerId(openColorPickerId === c.id ? null : c.id)}
                     onContextMenu={(e) => { e.preventDefault(); updateChannel(c.id, { color: null }); }} />
                   {openColorPickerId === c.id && (

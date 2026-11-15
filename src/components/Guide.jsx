@@ -162,6 +162,12 @@ export default function Guide() {
         <p className="sa-sub"><b>Boxes</b> — open the "Boxes" panel to define named, colored
           groupings for patch/routing: lettered sub-snakes (A, B, C…) or physical locations (SL,
           Pit, Local). Assign any channel to one from its Stage Box dropdown.</p>
+        <p className="sa-sub"><b>Left color follows stage box</b> — the color bar on the left of each input row
+          is normally the group color (drums yellow, vocals blue), like the colors on a console. If you'd rather
+          color by where things plug in, tick <b>Left color follows stage box</b> at the bottom of the Boxes panel:
+          channels in a box then show that box's color, and channels with no box keep their group color. A color you
+          set by hand on one row always wins. It's saved per show and only changes what you see and print, so turning
+          it off puts everything back exactly as it was.</p>
         <p className="sa-sub"><b>How box lines are labeled</b> — a line is the box name plus its position,
           like <code>A3</code> or <code>Rack 1-2</code>. A one-letter box name keeps the compact style
           (<code>A3</code>); any other name gets a hyphen so nothing runs together (a box called "Box 1" prints
@@ -180,8 +186,12 @@ export default function Guide() {
           top of the column selects or clears every row. An action bar
           appears with how many are selected. Drag any ticked row's ⠿ handle to move <i>all</i> of them
           together, or use the bar to nudge them <b>↑ Up / ↓ Down</b>, put them in a <b>stage box</b> in one
-          go (they number themselves in list order), or give them one <b>color</b>. <b>Clear</b> unticks
-          everything. On desktop, Alt/⌥+↑/↓ on a ticked row moves the whole selection too.</p>
+          go (they number themselves in list order), set one <b>stand</b> type for all of them, or give them one
+          <b>color</b>. <b>Clear</b> unticks everything. On desktop, Alt/⌥+↑/↓ on a ticked row moves the whole selection too.</p>
+        <p className="sa-sub"><b>Jump a channel to a number</b> — click the channel number on a row, type where it
+          should go (say 12), and press Enter. The row lands there and the rest shuffle along. If several rows are
+          ticked, the whole selection moves together, with the first ticked row landing on the number you typed.
+          Press Esc to cancel. A number bigger than your list just puts it at the end.</p>
         <p className="sa-sub"><b>Sort by group</b> arranges channels in console order — drums →
           perc → bass → guitars → keys → strings/horns → vocals → playback. It's not permanent: right after
           sorting, the button becomes <b>↩ Unsort</b>, and clicking it puts the channels back in the order they

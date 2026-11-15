@@ -170,7 +170,7 @@ export default function Landing() {
       <div style={{ margin: "56px 0", textAlign: "center" }}>
         <h2 className="sa-h2" style={{ fontSize: 16 }}>Support StageAdvance</h2>
         <p className="sa-sub" style={{ fontSize: 13, maxWidth: 480, margin: "0 auto 16px" }}>
-          StageAdvance is free to use. If it saves you time, voluntary support helps keep it running.
+          StageAdvance is free to use. Hosting and the database cost about $37 a month, paid by me. If it saves you time, even $5 helps cover that and funds new features.
         </p>
         <a
           href="https://ko-fi.com/stageadvance"

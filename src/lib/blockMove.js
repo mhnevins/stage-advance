@@ -60,3 +60,23 @@ export function patchSelected(items, selectedIds, patch) {
   const sel = new Set(selectedIds);
   return items.map((x) => (sel.has(x.id) ? { ...x, ...patch } : x));
 }
+
+/**
+ * Move the selected rows so the FIRST of them lands at 1-based position `n`
+ * (the number a person types into the channel-number box). The rows keep
+ * their current relative order. `n` is clamped so the whole block always
+ * fits: typing 99 on a 10-row list puts a single row last, and puts a
+ * 3-row block at 8-10. Anything that isn't a whole number >= 1 changes
+ * nothing.
+ */
+export function moveBlockToPosition(items, selectedIds, n) {
+  const sel = new Set(selectedIds);
+  const block = items.filter((x) => sel.has(x.id));
+  if (block.length === 0 || !Number.isFinite(n)) return items;
+  const want = Math.floor(n);
+  if (want < 1) return items;
+  const rest = items.filter((x) => !sel.has(x.id));
+  const at = Math.min(want - 1, rest.length);
+  const next = [...rest.slice(0, at), ...block, ...rest.slice(at)];
+  return next.every((x, i) => x === items[i]) ? items : next;
+}

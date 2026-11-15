@@ -78,3 +78,41 @@ test("patchSelected changes only the selected rows, in one new array", () => {
   assert.deepEqual(out, [{ id: "a", boxId: "A", boxPos: null }, { id: "b", boxId: null }, { id: "c", boxId: "A", boxPos: null }]);
   assert.equal(l[0].boxId, null);
 });
+
+/* ——— typing a channel number ——— */
+import { moveBlockToPosition } from "./blockMove.js";
+const ten = Array.from({ length: 10 }, (_, i) => ({ id: `r${i + 1}` }));
+const idsC = (a) => a.map((x) => x.id).join(",");
+
+test("typed number: a single row ends up at exactly that channel number", () => {
+  assert.equal(moveBlockToPosition(ten, ["r3"], 7)[6].id, "r3");
+  assert.equal(idsC(moveBlockToPosition(ten, ["r3"], 7)), "r1,r2,r4,r5,r6,r7,r3,r8,r9,r10");
+  assert.equal(idsC(moveBlockToPosition(ten, ["r8"], 2)), "r1,r8,r2,r3,r4,r5,r6,r7,r9,r10");
+});
+
+test("typed number: too big goes last, too small is ignored", () => {
+  assert.equal(moveBlockToPosition(ten, ["r2"], 99)[9].id, "r2");
+  assert.equal(moveBlockToPosition(ten, ["r2"], 0), ten);
+  assert.equal(moveBlockToPosition(ten, ["r2"], -4), ten);
+  assert.equal(moveBlockToPosition(ten, ["r2"], NaN), ten);
+});
+
+test("typed number: its own number changes nothing (same array back)", () => {
+  assert.equal(moveBlockToPosition(ten, ["r4"], 4), ten);
+});
+
+test("typed number: a block keeps its order and its first row lands on the number", () => {
+  const out = moveBlockToPosition(ten, ["r2", "r6", "r9"], 4);
+  assert.equal(idsC(out), "r1,r3,r4,r2,r6,r9,r5,r7,r8,r10");
+  assert.equal(out[3].id, "r2");
+});
+
+test("typed number: a block is clamped so it always fits at the end", () => {
+  assert.equal(idsC(moveBlockToPosition(ten, ["r1", "r2", "r3"], 50)), "r4,r5,r6,r7,r8,r9,r10,r1,r2,r3");
+});
+
+test("typed number: decimals are floored; nothing selected changes nothing; input never mutated", () => {
+  assert.equal(moveBlockToPosition(ten, ["r1"], 3.9)[2].id, "r1");
+  assert.equal(moveBlockToPosition(ten, [], 3), ten);
+  assert.equal(ten[0].id, "r1");
+});
