@@ -10,6 +10,8 @@
  * jump-links at the top; keep ids in sync if you rename a heading.
  */
 
+import { useEffect } from "react";
+
 const Jump = ({ id, children }) => (
   <a href={`#${id}`} className="sa-sub" style={{ textDecoration: "underline" }}>{children}</a>
 );
@@ -29,6 +31,14 @@ const Step = ({ n, title, children }) => (
 );
 
 export default function Guide() {
+  /* The page is built by React after it loads, so the browser's own jump to
+     /guide#something runs before that section exists and leaves you at the
+     top. Scroll to it once the guide is on screen. */
+  useEffect(() => {
+    const id = decodeURIComponent(window.location.hash.slice(1));
+    if (id) document.getElementById(id)?.scrollIntoView();
+  }, []);
+
   return (
     <div className="sa-grid" style={{ maxWidth: 860, margin: "0 auto" }}>
       <div className="sa-card">
