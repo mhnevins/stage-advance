@@ -89,7 +89,10 @@ export default function Guide() {
           Back on the Planner, click <b>+ New show</b>. Fill in band/date/venue if you have them —
           all optional, all editable later. The Band Form (see below) is a completely optional way
           to get this info from a band ahead of time — feel free to skip it entirely and just plan
-          the show yourself.
+          the show yourself. Want to see a finished one first? On a brand-new account, the welcome
+          card has a <b>Try a sample show</b> button. It adds a five-piece band with stage boxes
+          and outputs already set up. Edit it however you like, or delete it when you're done; it
+          never touches your locker.
         </Step>
         <Step n={7} title="Tap what's on stage">
           In the show, tap instrument chips (Kick, Snare, Lead Vox, etc.) to add channels — each one

@@ -12,6 +12,7 @@ import { withOutputPositions, OUTPUT_LOCAL_BOX } from "./lib/outputPositions";
 import { moveBlockTo, moveBlockBy, rangeIds, patchSelected, moveBlockToPosition } from "./lib/blockMove";
 import { resolveChannelColor } from "./lib/channelColor";
 import { applySort, isSortedState, undoSort } from "./lib/sortToggle";
+import { buildSampleShow } from "./lib/sampleShow";
 import { lookupMicLibrary, cacheMicLibraryEntry, fetchAiTagsForMic } from "./lib/micLibrary";
 import { resolveOwnerBySlug, updateMyProfile } from "./lib/profile";
 import { exportMyData, deleteMyAccount } from "./lib/account";
@@ -555,7 +556,10 @@ export default function StageAdvance() {
 
   const inventory = {};
   inventoryItems.forEach((i) => { inventory[i.label] = i.qty; });
-  const MIC_OPTIONS = [...Object.keys(inventory), ...EXTRA_OPTIONS];
+  /* A sample show carries its own mic list (src/lib/sampleShow.js) so its
+     mics read as normal mics, not rentals, even with an empty locker. */
+  const sampleMics = shows.find((s) => s.id === activeId)?.sampleMics || [];
+  const MIC_OPTIONS = [...Object.keys(inventory), ...EXTRA_OPTIONS, ...sampleMics];
   const isRental = (mic) => mic !== "" && !MIC_OPTIONS.includes(mic);
 
   /* Data-driven phantom check: prefer the engineer's own recognized/edited
@@ -1291,6 +1295,13 @@ export default function StageAdvance() {
     setActiveId(s.id);
   };
 
+  const startSampleShow = () => {
+    const s = buildSampleShow(uid, newShow());
+    setShows((p) => [s, ...p]);
+    syncRef.current.markDirty(s.id);
+    setActiveId(s.id);
+  };
+
   const deleteShow = (id) => {
     setShows((prev) => prev.filter((s) => s.id !== id));
     if (activeId === id) setActiveId(null);
@@ -2016,6 +2027,13 @@ ${gearSection}
               <div>{st.action}</div>
             </div>
           ))}
+          <div style={{ borderTop: "1px solid #2c2f37", marginTop: 4, paddingTop: 12, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <div style={{ fontWeight: 700 }}>Want to see one first?</div>
+              <div className="sa-sub">Opens a finished sample show: input list, stage boxes, outputs, mic pull and stand count. Edit it or delete it any time.</div>
+            </div>
+            <button className="sa-btn" onClick={startSampleShow}>Try a sample show</button>
+          </div>
         </div>
       )}
 
@@ -2756,6 +2774,18 @@ ${gearSection}
         </div>
       )}
 
+      {active.sample && !active.sampleNoteDismissed && (
+        <div className="no-print" style={{ display: "flex", alignItems: "flex-start", gap: 10, flexWrap: "wrap", padding: "10px 12px", border: "1px solid #E8B93E", borderRadius: 8, background: "#17181c" }}>
+          <div className="sa-sub" style={{ flex: 1, minWidth: 220, fontSize: 13 }}>
+            <b style={{ color: "#E8B93E" }}>This is a sample show</b>, so you can see how everything fits together.
+            Its mics aren't from your locker: add yours under Inventory, then change the Mic / DI column on any channel.
+            To set up stage boxes, open Boxes (for inputs) or Output Boxes (for outputs), name your own, then pick a box on each line.
+            Delete this show whenever you like.
+          </div>
+          <button className="sa-btn ghost" onClick={() => updateShow({ sampleNoteDismissed: true })} aria-label="Dismiss" title="Hide this note">✕</button>
+        </div>
+      )}
+
       {/* Show details */}
       <div className="sa-card">
         <h2 className="sa-h2">Show details</h2>
@@ -3051,6 +3081,12 @@ ${gearSection}
                     <optgroup label="DI / Wireless">
                       {EXTRA_OPTIONS.map((m) => <option key={m} value={m}>{m}</option>)}
                     </optgroup>
+                    {sampleMics.length > 0 && (
+                      <optgroup label="Sample show mics">
+                        {sampleMics.filter((m) => !EXTRA_OPTIONS.includes(m) && inventory[m] === undefined)
+                          .map((m) => <option key={m} value={m}>{m}</option>)}
+                      </optgroup>
+                    )}
                     <optgroup label="Not in locker">
                       <option value={RENTAL}>Rental / other…</option>
                     </optgroup>
