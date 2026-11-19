@@ -41,6 +41,7 @@ export default function Guide() {
         <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 16px" }}>
           <Jump id="walkthrough">New user walkthrough</Jump>
           <Jump id="planner">Planner</Jump>
+          <Jump id="sample">Sample show</Jump>
           <Jump id="inputs">Input list</Jump>
           <Jump id="outputs">Outputs</Jump>
           <Jump id="inventory">Inventory</Jump>
@@ -89,10 +90,9 @@ export default function Guide() {
           Back on the Planner, click <b>+ New show</b>. Fill in band/date/venue if you have them —
           all optional, all editable later. The Band Form (see below) is a completely optional way
           to get this info from a band ahead of time — feel free to skip it entirely and just plan
-          the show yourself. Want to see a finished one first? On a brand-new account, the welcome
-          card has a <b>Try a sample show</b> button. It adds a five-piece band with stage boxes
-          and outputs already set up. Edit it however you like, or delete it when you're done; it
-          never touches your locker.
+          the show yourself. Want to see a finished one first? The welcome card on a brand-new
+          account has a <b>Try a sample show</b> button (details under{" "}
+          <Jump id="sample">Sample show</Jump> below).
         </Step>
         <Step n={7} title="Tap what's on stage">
           In the show, tap instrument chips (Kick, Snare, Lead Vox, etc.) to add channels — each one
@@ -137,6 +137,29 @@ export default function Guide() {
         <p className="sa-sub"><b>Shows</b> — <b>+ New show</b> starts one from scratch (no band form
           required); <b>Duplicate</b> copies an existing show (handy for a repeat act); <b>Delete</b>{" "}
           removes one for good.</p>
+        <p className="sa-sub" id="sample"><b>Sample show</b> — the welcome card on a brand-new account
+          (one with no shows yet) has a <b>Try a sample show</b> button. One click adds a finished
+          show called "Sample Band": a five-piece band with 15 channels, two stage boxes (a drum
+          box and a main box), and a few outputs, so you can see the input list, mic pull, stand
+          count, and print sheet filled in before you build anything of your own.</p>
+        <ul className="sa-sub">
+          <li><b>It's a normal show.</b> Everything in it is editable: rename it, change any mic,
+            stand, or box, add or remove channels, print it. Nothing is locked.</li>
+          <li><b>Its mics aren't from your locker.</b> They appear in each row's Mic / DI list under
+            "Sample show mics" and are not flagged as rentals. To use your own gear, add it under
+            the <b>Inventory</b> tab, then pick it from the Mic / DI list on any channel. It never
+            adds anything to your locker.</li>
+          <li><b>Trying stage boxes?</b> Open <b>Boxes</b> (for inputs) or <b>Output Boxes</b> (for
+            outputs) to rename, recolor, or add your own, then choose a box on each line.</li>
+          <li><b>The yellow note</b> at the top explains this; click its <b>✕</b> to hide it.</li>
+          <li><b>To delete it,</b> go back to <b>← All shows</b> and click <b>Delete</b> on the
+            Sample Band row. There's no confirmation, and it's gone for good (like any show, it's
+            only recoverable from a backup file; see{" "}
+            <Jump id="backup">Backup &amp; restore</Jump>). Deleting it doesn't affect anything
+            else in your account.</li>
+          <li><b>Want it back?</b> The button only appears while you have no shows at all, so once
+            you've built your own it won't return. Please don't delete real shows to get it back.</li>
+        </ul>
         <div className="sa-sub" style={{ borderLeft: "2px solid #4CC3C9", paddingLeft: 12 }}>
           Every engineer gets a different Band Form link — a band's answers only ever reach your
           inbox, never anyone else's.
